@@ -25,18 +25,19 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 28 geometry and export tests
+    npm test                  # 35 geometry and export tests (7 of them build the STEP solid)
     npm run build
-    node test/interact.mjs    # 29 click-through steps in headless Chromium
-    node test/viewer.mjs      # 19 checks of the claude.ai artifact build
+    node test/interact.mjs    # 30 click-through steps in headless Chromium
+    node test/viewer.mjs      # 21 checks of the claude.ai artifact build
 
 All must pass. Add a test for every new behavior and for every bug fixed. The two browser scripts need
 Playwright with Chromium, which is not in `package.json`: Anthropic's cloud sessions have it installed;
 on another machine install it first.
 
 When an export changes, also run `python3 tools/check_exports.py` after the click-through. It re-reads
-the files the page really saved with its own DXF and SVG readers, sharing no code with the app. That is
-how the pocket width, hole diameters and curve agreement were confirmed.
+the files the page really saved with its own DXF, SVG and STEP readers, sharing no code with the app. That
+is how the pocket width, hole diameters, curve agreement and the STEP file's holes and pocket floors were
+confirmed. If the `gmsh` Python package is installed it also opens the STEP file with a second program.
 
 ## Geometry
 
@@ -45,6 +46,19 @@ how the pocket width, hole diameters and curve agreement were confirmed.
 - y = 0 is the scale line, exactly one scale length from the nut. +y points to the neck.
 - z = 0 is the back face.
 - A mirrored outline stores only the bass half.
+
+## 3D: two solids, kept in agreement
+
+- `src/model/solid.js` is a stack of flat slices. It drives the 3D picture and the weight, and never fails.
+- `src/export/step.js` is the true CAD solid for the STEP file, built by OpenCascade through replicad.
+- `test/step.test.mjs` holds their volumes within 0.1% of each other. A new contour or cut goes into both,
+  and that test is how a mistake in either one shows up. Check volume after every engine change: a faster
+  way of cutting pockets once gave a body 7% too heavy with no error at all.
+- No depth without a source applies here too: a hole with no recorded depth is left out of the STEP file
+  and named in the save dialog, never drilled to a guess.
+- The direction (owner's decision, November 2026): this becomes a guitar-specific CAD/CAM tool. 2D stays
+  the master for pockets so they cut crisply; 3D tools are for body contours, neck heels and volutes.
+  Body first, then the neck.
 
 ## Template conventions (ask the owner before changing these)
 
@@ -60,13 +74,17 @@ how the pocket width, hole diameters and curve agreement were confirmed.
 **Built:** outline editor with four starting shapes and reference overlays; Fender-pattern neck presets
 and custom necks; six pickup cavities plus a custom rectangle; three bridges; controls and back cavity;
 arm bevel (flat) and belly cut (dished); live build checks; 3D view; templates with bearing or bushing
-offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export.
+offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; a STEP file of the
+body (true solid, with rolled or square edges).
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
-carved tops, STEP export, whole-guitar balance, ordering cut templates.
+carved tops, a 3D neck (profile, heel, volute, headstock), STEP roundovers larger than the outline's
+tightest outside curve, depths for bridge post, ferrule and pilot holes, whole-guitar balance, ordering
+cut templates.
 
 **Never checked in the real world:** nothing has been cut on a laser or routed in wood; the files have
-not been opened in LightBurn, Vectric or Fusion; the published artifact has not been opened signed in;
+not been opened in LightBurn, Vectric or Fusion (the STEP file included: it has only been re-read by gmsh);
+the 3D engine has never been fetched from the real CDN, only from a local copy in the tests; the published artifact has not been opened signed in;
 touch gestures, Safari and Firefox are untried.
 
 **Waiting on the owner:**
@@ -74,6 +92,8 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
+- Whether the STEP file opens correctly in his Vectric, and at the right size.
+- How deep bridge post holes, string ferrule holes and bridge screw pilots should be drilled.
 
 ## Things that are easy to get wrong
 
@@ -83,4 +103,7 @@ touch gestures, Safari and Firefox are untried.
   `package.json`. Change both together, and keep `build.mjs` in step.
 - Inside a claude.ai artifact a page cannot start a download. Saves go through the viewer's downloads
   capability (`src/ui/files.js`), which refuses `.dxf`; that is why the DXF travels inside the zip.
+- The 3D engine (replicad and replicad-opencascadejs) is pinned under `devDependencies`. It is fetched only
+  when a 3D model is saved; `build.mjs` reads the versions from `package.json`, and `test/browser.mjs`
+  serves the same files from `node_modules`. Change the two packages together: they are a matched pair.
 - Rebuild before committing so `dist/` matches `src/`.

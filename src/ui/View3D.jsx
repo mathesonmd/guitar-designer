@@ -5,7 +5,7 @@ import { useSize, Seg, Check } from './widgets.jsx';
 
 const WOOD_COLOR = { alder: 0xb68a5c, basswood: 0xd6bf97, poplar: 0xc4b98a, mahogany: 0x7c4a33, walnut: 0x5d4333, ash: 0xd8bd8c, maple: 0xe2c898, custom: 0xb68a5c };
 
-export default function View3D({ design, g, solid }) {
+export default function View3D({ design, g, solid, onSaveModel }) {
   const wrap = useRef(null), canvas = useRef(null);
   const size = useSize(wrap);
   const three = useRef(null);
@@ -149,6 +149,7 @@ export default function View3D({ design, g, solid }) {
         <Seg label="View" value="" onChange={(v) => look(...{ front: [0, Math.PI / 2 - 0.001], back: [Math.PI, Math.PI / 2 - 0.001], angle: [-0.5, 1.22], edge: [Math.PI / 2, Math.PI / 2 - 0.001] }[v])}
           options={[{ value: 'angle', label: 'Angle' }, { value: 'front', label: 'Front' }, { value: 'back', label: 'Back' }, { value: 'edge', label: 'Edge' }]} />
         <div className="float" style={{ position: 'static' }}><Check checked={parts} onChange={setParts}>Neck and hardware</Check></div>
+        {onSaveModel && <button className="btn" onClick={onSaveModel}>Save 3D model…</button>}
       </div>
       <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>Neck and hardware are shown for looks</span></div>
     </div>

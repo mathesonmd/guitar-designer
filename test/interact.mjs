@@ -2,7 +2,7 @@
 // document, the screen and the downloaded files end up as. Usage: node test/interact.mjs [outdir]
 import fs from 'node:fs';
 import path from 'node:path';
-import { open, out } from './browser.mjs';
+import { open, out, fetched } from './browser.mjs';
 
 fs.mkdirSync(out, { recursive: true });
 const dl = path.join(out, 'downloads');
@@ -60,8 +60,8 @@ const waitToast = async (re) => {
   throw new Error(`message not shown: wanted ${re}, last saw "${last}"`);
 };
 const setField = async (selector, text) => { const f = page.locator(selector); await f.click(); await f.fill(text); await f.press('Enter'); };
-const saveDownload = async (trigger) => {
-  const [d] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), trigger()]);
+const saveDownload = async (trigger, timeout = 20000) => {
+  const [d] = await Promise.all([page.waitForEvent('download', { timeout }), trigger()]);
   const p = path.join(dl, d.suggestedFilename());
   await d.saveAs(p);
   return p;
@@ -447,6 +447,39 @@ await step('template files download: pack, SVG, PDF (Letter and A4) and DXF', as
   files.dxf = await saveDownload(() => page.click('.tbar button:text-is("DXF")'));
   for (const [k, p] of Object.entries(files)) assert(fs.statSync(p).size > 2000, `${k} is ${fs.statSync(p).size} bytes`);
   return Object.entries(files).map(([k, p]) => `${path.basename(p)} ${(fs.statSync(p).size / 1024).toFixed(0)} KB`).join(' · ');
+});
+
+await step('a 3D model of the body saves as a STEP file, with rolled or square edges; the 3D engine is fetched only then', async () => {
+  await tab('3D'); await settle(1200);
+  await page.click('.viewopts button:has-text("Save 3D model")');
+  const dlg = page.locator('.dialog[aria-label="Save a 3D model of the body"]');
+  await dlg.waitFor({ timeout: 3000 });
+  const said = await dlg.innerText();
+  assert(/arm bevel, as a flat cut/i.test(said) && /belly cut, as a smooth dish/i.test(said), 'the dialog lists the arm bevel and belly cut');
+  assert(/Not in the file/i.test(said) && /does not say how deep/i.test(said), 'the dialog names the holes that are left out');
+  assert(/has not been opened in Vectric, Fusion/.test(said), 'the dialog says the file is unchecked in real programs');
+  assert(fetched.length === 0, 'no 3D engine file was fetched before Save was clicked');
+  await page.screenshot({ path: path.join(out, 'model3d-dialog.png') });
+  const t0 = Date.now();
+  files.step = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const first = Date.now() - t0;
+  assert(fetched.length === 3, `three engine files fetched, got ${fetched.length}`);
+  const head = fs.readFileSync(files.step, 'utf8').slice(0, 200);
+  assert(head.startsWith('ISO-10303-21;'), 'file starts as a STEP file: ' + head.slice(0, 30));
+  await dlg.locator('[role="status"]:has-text("body.step")').waitFor({ timeout: 5000 });
+  // square edges: a second save, with no second fetch of the engine
+  await dlg.locator('label.check:has-text("Roll the edge roundovers") input').uncheck();
+  assert(/Square edges/.test(await dlg.innerText()), 'the list now says the edges are square');
+  const rolled = files.step.replace('.step', '-rolled.step'); fs.renameSync(files.step, rolled); files.step = rolled;
+  const t1 = Date.now();
+  files.stepSquare = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const second = Date.now() - t1;
+  const square = files.stepSquare.replace('.step', '-square.step'); fs.renameSync(files.stepSquare, square); files.stepSquare = square;
+  assert(fetched.length === 3, 'the engine was not fetched again');
+  assert(fs.statSync(files.stepSquare).size < fs.statSync(files.step).size, 'the square-edged file is the smaller one');
+  await page.keyboard.press('Escape'); await settle(300);
+  assert(await dlg.count() === 0, 'Escape closes the dialog');
+  return `rolled ${(fs.statSync(files.step).size / 1024).toFixed(0)} KB in ${(first / 1000).toFixed(1)} s (with the engine fetch) · square ${(fs.statSync(files.stepSquare).size / 1024).toFixed(0)} KB in ${(second / 1000).toFixed(1)} s`;
 });
 
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {

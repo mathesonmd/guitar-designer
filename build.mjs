@@ -9,11 +9,14 @@ import { fileURLToPath } from 'node:url';
 
 const root = path.dirname(fileURLToPath(import.meta.url));
 const shim = (f) => path.join(root, 'src/shims', f);
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
 const result = await build({
   entryPoints: [path.join(root, 'src/main.jsx')],
   bundle: true, format: 'iife', write: false, minify: true, target: ['es2019'],
   jsx: 'transform', loader: { '.js': 'jsx' },
   alias: { react: shim('react.cjs'), 'react-dom/client': shim('react-dom-client.cjs'), three: shim('three.cjs'), 'clipper-lib': shim('clipper.cjs'), jspdf: shim('jspdf.cjs') },
+  // the 3D engine is fetched on demand at the versions pinned in package.json (see src/ui/cadEngine.js)
+  define: { __CAD_WRAPPER_VERSION__: JSON.stringify(pkg.devDependencies.replicad), __CAD_ENGINE_VERSION__: JSON.stringify(pkg.devDependencies['replicad-opencascadejs']) },
   legalComments: 'none',
 });
 const js = result.outputFiles[0].text.replace(/<\/script/gi, '<\\/script');

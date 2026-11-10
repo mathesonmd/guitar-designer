@@ -7,6 +7,10 @@
 # It checks the zip, that holes are true circles at their stated diameters, that openings match the
 # published cavity sizes, that the neck pocket walls are one heel width apart, that the SVG and DXF
 # trace the same curves, and (when poppler's pdfinfo is installed) the PDF page count and paper size.
+# For the 3D model it reads the STEP text with its own reader: units, one closed solid, the back at
+# height 0 and the top at the body thickness, a true cylinder for every through hole where the design
+# puts it, the neck pocket's corner cylinders, and a flat floor at each pocket's depth. When the gmsh
+# Python package is installed it also opens the file with gmsh's STEP importer and measures it.
 import sys, os, zipfile, json, math, re
 D = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'test-output', 'downloads')
 IN = 25.4
@@ -204,5 +208,91 @@ for paper, (pw, ph) in (('letter', (612.0, 792.0)), ('a4', (595.28, 841.89))) if
     pages = int(re.search(r'Pages:\s+(\d+)', info).group(1)) if info else -1
     size = re.search(r'Page size:\s+([\d.]+) x ([\d.]+) pts', info)
     check(pages >= 6 and size and abs(float(size.group(1)) - pw) < 0.5 and abs(float(size.group(2)) - ph) < 0.5, '%s PDF: %d pages of %s x %s pt' % (paper, pages, size.group(1) if size else '?', size.group(2) if size else '?'))
+# ---------- STEP (3D model of the body) ----------
+def parse_step(text):
+    body = text[text.index('DATA;') + 5:text.rindex('ENDSEC;')]
+    ents = {}
+    for m in re.finditer(r'#(\d+)\s*=\s*(.*?);\s*(?=#\d+\s*=|$)', body, re.S):
+        raw = ' '.join(m.group(2).split())
+        k = re.match(r'([A-Z0-9_]+)\s*\((.*)\)$', raw)
+        ents[int(m.group(1))] = (k.group(1), k.group(2)) if k else ('COMPLEX', raw)
+    return ents
+def refs(a): return [int(x) for x in re.findall(r'#(\d+)', a)]
+def nums(a): return [float(x) for x in re.findall(r'[-+]?\d+\.\d*(?:[eE][-+]?\d+)?', a)]
+def step_report(path, rolled):
+    text = open(path).read()
+    E = parse_step(text)
+    kinds = {}
+    for k, _ in E.values(): kinds[k] = kinds.get(k, 0) + 1
+    print('STEP', os.path.basename(path), len(E), 'entities;', {k: kinds.get(k, 0) for k in ('PLANE', 'CYLINDRICAL_SURFACE', 'B_SPLINE_SURFACE_WITH_KNOTS', 'TOROIDAL_SURFACE', 'ADVANCED_FACE')})
+    check(text.startswith('ISO-10303-21;') and re.search(r'SI_UNIT\s*\(\s*\.MILLI\.\s*,\s*\.METRE\.\s*\)', text) is not None, 'a STEP file in millimeters')
+    check(kinds.get('MANIFOLD_SOLID_BREP', 0) == 1 and kinds.get('CLOSED_SHELL', 0) == 1, 'one solid with one closed skin')
+    pt = lambda i: nums(E[i][1])[-3:]
+    def placement(i):  # AXIS2_PLACEMENT_3D -> (origin, axis direction)
+        r = refs(E[i][1]); return pt(r[0]), (pt(r[1]) if len(r) > 1 else [0.0, 0.0, 1.0])
+    T = design['body']['thickness']
+    vz = [pt(refs(a)[0])[2] for k, a in E.values() if k == 'VERTEX_POINT']
+    check(abs(min(vz)) < 1e-6 and abs(max(vz) - T) < 1e-6, 'back face at height 0, top face at %.3f mm (corners span %.4f to %.4f)' % (T, min(vz), max(vz)))
+    cyl = []
+    for k, a in E.values():
+        if k == 'CYLINDRICAL_SURFACE':
+            o, ax = placement(refs(a)[0]); cyl.append((o, ax, nums(a.split(',')[-1])[0]))
+    upright = [(o, r) for o, ax, r in cyl if abs(abs(ax[2]) - 1) < 1e-9]
+    def has_cyl(x, y, r): return any(abs(o[0] - x) < 1e-4 and abs(o[1] - y) < 1e-4 and abs(rr - r) < 1e-6 for o, rr in upright)
+    nk = design['neck']
+    heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
+    screws = [(sx, sy) for sy in (s0, s0 + nk['screwAlong']) for sx in (-sa, sa)]
+    check(all(has_cyl(x, y, nk['screwBodyHole'] / 2) for x, y in screws), 'four neck screw holes are true cylinders, %.2f mm across, where the neck numbers put them' % nk['screwBodyHole'])
+    check(all(has_cyl(c['x'], c['y'], c['d'] / 2) for c in design['controls']), '%d control holes are true cylinders at their places and sizes' % len(design['controls']))
+    R = nk['heelCornerR']; hw = nk['heelWidth'] / 2
+    if R > 0.05: check(has_cyl(-(hw - R), heel + R, R) and has_cyl(hw - R, heel + R, R), 'neck pocket corners are true %.3f mm arcs, one heel width (%.3f mm) apart' % (R, 2 * hw))
+    floors = []
+    for k, a in E.values():
+        if k == 'PLANE':
+            o, ax = placement(refs(a)[0])
+            if abs(abs(ax[2]) - 1) < 1e-9: floors.append(o[2])
+    want = [('neck pocket', T - nk['pocketDepth'])] + [('pickup cavity', T - p['depth']) for p in design['pickups']] + [(c['name'], c['depth'] if c['side'] == 'back' else T - c['depth']) for c in design['cavities']]
+    miss = [n for n, zf in want if not any(abs(f - zf) < 1e-6 for f in floors)]
+    check(not miss, 'a flat, level floor at the stated depth of every pocket (%d pockets)%s' % (len(want), '' if not miss else ': missing ' + ', '.join(miss)))
+    curved = kinds.get('B_SPLINE_SURFACE_WITH_KNOTS', 0) + kinds.get('TOROIDAL_SURFACE', 0)
+    return curved
+steps = sorted(glob.glob(D + '/*-body-*.step'))
+if not steps: print('  skip STEP checks: no 3D model was saved')
+else:
+    curved = {('rolled' if 'rolled' in f else 'square'): step_report(f, 'rolled' in f) for f in steps}
+    if len(curved) == 2: check(curved['rolled'] > curved['square'], 'the rolled-edge file carries the roundover surfaces the square-edged file lacks (%d against %d curved faces)' % (curved['rolled'], curved['square']))
+    try:
+        import gmsh
+    except Exception:
+        gmsh = None; print('  skip the gmsh measurement: the gmsh Python package is not installed (or cannot load)')
+    if gmsh:
+        # the outline's true extent, from the design's own Bezier points
+        nodes = design['outline']['nodes']
+        if design['outline'].get('symmetric'):
+            nodes = nodes + [dict(n, x=-n['x'], ix=-n['ox'], ox=-n['ix'], iy=n['oy'], oy=n['iy']) for n in reversed(nodes[1:-1])]
+            nodes[0] = dict(nodes[0], x=0, ix=-nodes[0]['ox'], iy=nodes[0]['oy'])
+            m = len(design['outline']['nodes']) - 1; nodes[m] = dict(nodes[m], x=0, ox=-nodes[m]['ix'], oy=nodes[m]['iy'])
+        xs, ys = [], []
+        for i, a in enumerate(nodes):
+            b = nodes[(i + 1) % len(nodes)]
+            P = [(a['x'], a['y']), (a['x'] + a['ox'], a['y'] + a['oy']), (b['x'] + b['ix'], b['y'] + b['iy']), (b['x'], b['y'])]
+            for j in range(2001):
+                t = j / 2000.0; u = 1 - t
+                xs.append(u ** 3 * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t ** 3 * P[3][0])
+                ys.append(u ** 3 * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t ** 3 * P[3][1])
+        sq = [f for f in steps if 'square' in f]
+        for f in (sq or steps)[:1]:
+            gmsh.initialize(); gmsh.option.setNumber('General.Terminal', 0)
+            gmsh.model.occ.importShapes(f); gmsh.model.occ.synchronize()
+            vols = gmsh.model.getEntities(3)
+            check(len(vols) == 1, 'gmsh opens %s as one solid' % os.path.basename(f))
+            bb = gmsh.model.getBoundingBox(*vols[0]); vol = gmsh.model.occ.getMass(*vols[0])
+            gmsh.finalize()
+            T = design['body']['thickness']
+            contours = design['contours']['arm']['on'] or design['contours']['belly']['on']
+            print('  gmsh: volume %.0f mm^3, box x %.3f to %.3f, y %.3f to %.3f, z %.3f to %.3f' % (vol, bb[0], bb[3], bb[1], bb[4], bb[2], bb[5]))
+            if contours: print('  (with an arm bevel or belly cut, gmsh reports a loose box around their curved faces, so only the volume is checked)')
+            else: check(abs(bb[0] - min(xs)) < 0.01 and abs(bb[3] - max(xs)) < 0.01 and abs(bb[1] - min(ys)) < 0.01 and abs(bb[4] - max(ys)) < 0.01 and abs(bb[2]) < 0.01 and abs(bb[5] - T) < 0.01, 'gmsh measures the model at the outline\'s true size and the body thickness')
+            check(0.5 * (max(xs) - min(xs)) * (max(ys) - min(ys)) * T < vol < (max(xs) - min(xs)) * (max(ys) - min(ys)) * T, 'gmsh volume is a believable share of the blank (%.0f%%)' % (100 * vol / ((max(xs) - min(xs)) * (max(ys) - min(ys)) * T)))
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)

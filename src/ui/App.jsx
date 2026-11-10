@@ -18,6 +18,7 @@ import Canvas2D from './Canvas2D.jsx';
 import Panels from './Panels.jsx';
 import Rail from './Rail.jsx';
 import View3D from './View3D.jsx';
+import Model3DDialog from './Model3DDialog.jsx';
 import TemplatesView from './TemplatesView.jsx';
 import { Seg, Dialog, Menu, memory } from './widgets.jsx';
 import { saveFile, readText, readDataURL, slug } from './files.js';
@@ -194,6 +195,7 @@ export default function App() {
             <button role="menuitem" onClick={() => setDialog('starter')}>New from a starting shape…</button>
             <button role="menuitem" onClick={() => openRef.current.click()}>Open a design…<small>A .guitar.json file saved from here</small></button>
             <button role="menuitem" onClick={async () => toast((await saveFile(`${slug(design.name)}.guitar.json`, JSON.stringify(design, null, 1))).message)}>Save this design<small>Keeps everything, to open again later</small></button>
+            <button role="menuitem" onClick={() => setDialog('model3d')}>Save a 3D model…<small>The body as a STEP file for CAD and CAM</small></button>
             <div className="sep" />
             <button role="menuitem" onClick={() => setDialog('sources')}>Where the numbers come from</button>
           </Menu>
@@ -207,7 +209,7 @@ export default function App() {
           onStarter={() => setDialog('starter')} onAddGhost={addGhost} onTraceGhost={traceGhost} onImportFretboard={importFretboard} />
         <main className="stage">
           {tab === 'design' && <Canvas2D design={design} g={g} sel={sel} setSel={setSel} edit={edit} begin={begin} commit={commit} show={show} findings={stale ? [] : slow.findings} viewCmd={viewCmd} ghosts={ghosts} />}
-          {tab === 'view3d' && slow.solid && <View3D design={slow.of || design} g={slow.g3} solid={slow.solid} />}
+          {tab === 'view3d' && slow.solid && <View3D design={slow.of || design} g={slow.g3} solid={slow.solid} onSaveModel={() => setDialog('model3d')} />}
           {tab === 'templates' && <TemplatesView design={design} toast={toast} />}
           {toastMsg && <div className="toast" role="status" aria-live="polite">{toastMsg}</div>}
         </main>
@@ -233,6 +235,7 @@ export default function App() {
           </div>
         </Dialog>
       )}
+      {dialog === 'model3d' && <Model3DDialog design={design} onClose={() => setDialog(null)} toast={toast} />}
       {dialog === 'sources' && <SourcesDialog design={design} onClose={() => setDialog(null)} />}
     </div>
   );

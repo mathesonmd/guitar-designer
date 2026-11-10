@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { open, out } from './browser.mjs';
+import { open, out, fetched } from './browser.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const content = fs.readFileSync(path.join(root, 'dist/artifact.html'), 'utf8');
@@ -70,6 +70,11 @@ check(!!(await toast(/Saved untitled-guitar\.guitar\.json/)), 'design file saved
 const saves = await page.evaluate(() => window.__saves);
 check(saves.length === 4 && saves[0].kind === 'blob' && saves[0].head === '504b0304' && saves[0].size > 100000, `pack handed over as a zip blob (${saves[0] ? (saves[0].size / 1024).toFixed(0) : '?'} KB)`);
 check(saves[1] && saves[1].kind === 'string' && saves[2].kind === 'blob' && saves[2].head === '25504446' && saves[3].kind === 'string', 'SVG and design as text, PDF as a blob starting %PDF');
+await page.click('.menuwrap > button'); await page.click('.menu button:has-text("Save a 3D model")');
+const model = page.locator('.dialog[aria-label="Save a 3D model of the body"]');
+check(/Saving a 3D model does not work inside claude\.ai/.test(await model.innerText()) && await model.locator('button:has-text("Save 3D model (.step)")').count() === 0, 'the 3D model dialog says it cannot save inside claude.ai and offers no button that would fail');
+check(fetched.length === 0, 'the viewer build never fetches the 3D engine');
+await page.keyboard.press('Escape');
 await page.evaluate(() => { window.__mode = 'decline'; });
 await page.click('.top .seg[aria-label="View"] button:has-text("Templates")');
 await page.click('.tbar button:text-is("SVG")');
