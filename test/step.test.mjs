@@ -8,7 +8,7 @@ import start from 'replicad-opencascadejs';
 import { defaultDesign, STARTERS, makeBridge } from '../src/model/design.js';
 import { derive } from '../src/model/derive.js';
 import { buildLayers } from '../src/model/solid.js';
-import { buildBodySolid, holesLeftOut, toSTEP } from '../src/export/step.js';
+import { buildBodySolid, holesLeftOut, toSTEP, toSTL } from '../src/export/step.js';
 
 let oc;
 before(async () => { oc = await start(); rc.setOC(oc); });
@@ -91,4 +91,30 @@ test('the STEP text is in millimeters, with true cylinders for holes and flat fl
     const z = c.side === 'back' ? c.depth : T - c.depth;
     assert.ok(planeZ.some((v) => Math.abs(v - z) < 1e-6), `a flat floor at height ${z.toFixed(3)} for ${c.label}`);
   }
+});
+
+test('the STL is a closed mesh of the same solid: every edge shared by two facets, same volume, same size', () => {
+  const d = defaultDesign(); d.contours.arm.on = true; d.contours.belly.on = true;
+  const { g, cad } = build(d);
+  const { data, triangles } = toSTL(cad.shape);
+  const view = new DataView(data.buffer);
+  assert.equal(view.getUint32(80, true), triangles);
+  assert.equal(data.length, 84 + triangles * 50);
+  assert.ok(!String.fromCharCode(...data.slice(0, 5)).startsWith('solid'), 'a binary STL must not begin with the word "solid"');
+  const edges = new Map();
+  let vol = 0, x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity, z0 = Infinity, z1 = -Infinity;
+  for (let i = 0; i < triangles; i++) {
+    const o = 84 + i * 50, P = [0, 1, 2].map((k) => [0, 4, 8].map((j) => view.getFloat32(o + 12 + k * 12 + j, true)));
+    const [a, b, c] = P;
+    vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+    for (const p of P) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); z0 = Math.min(z0, p[2]); z1 = Math.max(z1, p[2]); }
+    for (const [p, q] of [[a, b], [b, c], [c, a]]) {
+      const k = p.join(',') + '>' + q.join(','), back = q.join(',') + '>' + p.join(',');
+      if (edges.get(back) > 0) { edges.get(back) === 1 ? edges.delete(back) : edges.set(back, edges.get(back) - 1); } else edges.set(k, (edges.get(k) || 0) + 1);
+    }
+  }
+  assert.equal(edges.size, 0, `${edges.size} facet edges have no partner: the mesh has a gap`);
+  assert.ok(pct(vol, cad.volume) < 0.01, `mesh volume differs from the solid by ${pct(vol, cad.volume).toFixed(4)}%`);
+  assert.ok(Math.abs(x1 - x0 - g.bbox.w) < 0.05 && Math.abs(y1 - y0 - g.bbox.h) < 0.05, `mesh is ${(x1 - x0).toFixed(3)} x ${(y1 - y0).toFixed(3)}, outline is ${g.bbox.w.toFixed(3)} x ${g.bbox.h.toFixed(3)}`);
+  assert.ok(Math.abs(z0) < 1e-4 && Math.abs(z1 - d.body.thickness) < 1e-4, 'back at 0, top at the body thickness');
 });

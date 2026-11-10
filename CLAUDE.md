@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 35 geometry and export tests (7 of them build the STEP solid)
+    npm test                  # 36 geometry and export tests (8 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 30 click-through steps in headless Chromium
     node test/viewer.mjs      # 21 checks of the claude.ai artifact build
@@ -51,6 +51,9 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 
 - `src/model/solid.js` is a stack of flat slices. It drives the 3D picture and the weight, and never fails.
 - `src/export/step.js` is the true CAD solid for the STEP file, built by OpenCascade through replicad.
+  The STL is a mesh of that same solid (facets within 0.02 mm), not of the slices.
+- The owner cuts guitars from Vectric Aspire, which opens STL but not STEP. He prefers STEP where a
+  program takes it. Keep both.
 - `test/step.test.mjs` holds their volumes within 0.1% of each other. A new contour or cut goes into both,
   and that test is how a mistake in either one shows up. Check volume after every engine change: a faster
   way of cutting pockets once gave a body 7% too heavy with no error at all.
@@ -74,8 +77,8 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 **Built:** outline editor with four starting shapes and reference overlays; Fender-pattern neck presets
 and custom necks; six pickup cavities plus a custom rectangle; three bridges; controls and back cavity;
 arm bevel (flat) and belly cut (dished); live build checks; 3D view; templates with bearing or bushing
-offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; a STEP file of the
-body (true solid, with rolled or square edges).
+offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; a 3D model of the
+body as STEP (true solid) or STL (fine mesh), with rolled or square edges.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
 carved tops, a 3D neck (profile, heel, volute, headstock), STEP roundovers larger than the outline's
@@ -83,7 +86,8 @@ tightest outside curve, depths for bridge post, ferrule and pilot holes, whole-g
 cut templates.
 
 **Never checked in the real world:** nothing has been cut on a laser or routed in wood; the files have
-not been opened in LightBurn, Vectric or Fusion (the STEP file included: it has only been re-read by gmsh);
+not been opened in LightBurn, Vectric or Fusion (the owner opened a STEP file in his 3D printing slicer,
+where it measured exactly right: 326.00 x 472.74 x 44.45 mm; the STL has only been re-read by our own checker);
 the 3D engine has never been fetched from the real CDN, only from a local copy in the tests; the published artifact has not been opened signed in;
 touch gestures, Safari and Firefox are untried.
 
@@ -92,7 +96,7 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- Whether the STEP file opens correctly in his Vectric, and at the right size.
+- Whether the STL opens correctly in his Vectric Aspire, at the right size, and how its pockets look there.
 - How deep bridge post holes, string ferrule holes and bridge screw pilots should be drilled.
 
 ## Things that are easy to get wrong

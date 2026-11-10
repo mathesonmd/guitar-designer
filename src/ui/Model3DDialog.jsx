@@ -1,17 +1,19 @@
-// "Save a 3D model": builds the body as a true CAD solid and saves it as a STEP file.
+// "Save a 3D model": builds the body as a true CAD solid and saves it as a STEP file (the exact
+// solid) or an STL file (a fine mesh of the same solid, for programs that do not read STEP).
 import React, { useMemo, useState } from 'react';
 import { derive } from '../model/derive.js';
-import { buildBodySolid, holesLeftOut, toSTEP } from '../export/step.js';
+import { buildBodySolid, holesLeftOut, toSTEP, toSTL, STL_TOLERANCE } from '../export/step.js';
 import { loadCadEngine } from './cadEngine.js';
 import { saveFile, slug, inViewer } from './files.js';
 import { fmtWithUnit } from '../core/units.js';
-import { Dialog, Check } from './widgets.jsx';
+import { Dialog, Check, Seg } from './widgets.jsx';
 
 const mm = (v) => `${+v.toFixed(2)} mm`;
 
 export default function Model3DDialog({ design, onClose, toast }) {
   const g = useMemo(() => derive(design, { tol: 0.005 }), [design]);
   const [roll, setRoll] = useState(true);
+  const [kind, setKind] = useState('step'); // 'step' or 'stl'
   const [busy, setBusy] = useState('');
   const [result, setResult] = useState(null); // { ok, message }
   const T = design.body.thickness, u = design.units;
@@ -36,9 +38,11 @@ export default function Model3DDialog({ design, onClose, toast }) {
       try { built = buildBodySolid(cad.rc, cad.oc, design, g, { roundovers: roll }); } catch (e) {
         throw new Error(e instanceof Error && e.message ? e.message : 'The 3D model could not be built from this design.');
       }
-      const text = await toSTEP(cad.rc, built.shape, `${design.name} body`);
+      const blob = kind === 'stl'
+        ? new Blob([toSTL(built.shape).data], { type: 'model/stl' })
+        : new Blob([await toSTEP(cad.rc, built.shape, `${design.name} body`)], { type: 'model/step' });
       try { built.shape.delete(); } catch (e) { /* already released */ }
-      const res = await saveFile(`${slug(design.name)}-body.step`, new Blob([text], { type: 'model/step' }));
+      const res = await saveFile(`${slug(design.name)}-body.${kind}`, blob);
       setResult(res);
       toast(res.message);
     } catch (e) {
@@ -49,7 +53,14 @@ export default function Model3DDialog({ design, onClose, toast }) {
 
   return (
     <Dialog title="Save a 3D model of the body" onClose={onClose}>
-      <p>This saves the body as a STEP file: a true solid that CAD and CAM programs can open. It is the body only. The neck and hardware in the 3D view are shown for looks and are not in the file.</p>
+      <p>This saves the body as a 3D model for CAD and CAM programs. It is the body only. The neck and hardware in the 3D view are shown for looks and are not in the file.</p>
+
+      <div style={{ margin: '12px 0 4px' }}>
+        <Seg label="File type" value={kind} onChange={setKind} options={[{ value: 'step', label: 'STEP' }, { value: 'stl', label: 'STL' }]} />
+        <p className="note">{kind === 'step'
+          ? 'STEP holds the exact solid, with true curves. Fusion and most CAD programs open it. Vectric Aspire does not.'
+          : `STL holds the same solid as a mesh of small flat facets that stay within ${STL_TOLERANCE} mm of the true surface. Vectric Aspire and 3D printing programs open it. An STL file does not record its units: this one is in millimeters, so choose millimeters if the program asks.`}</p>
+      </div>
 
       <h4>In the file</h4>
       <ul className="plain">
@@ -79,14 +90,16 @@ export default function Model3DDialog({ design, onClose, toast }) {
         </div>
       )}
 
-      <p className="note" style={{ color: 'var(--brass)' }}>Not yet checked in the real world: this file has not been opened in Vectric, Fusion or any other program, and nothing has been cut from it. Make a test cut in scrap first.</p>
+      <p className="note" style={{ color: 'var(--brass)' }}>{kind === 'step'
+        ? 'Checked so far: a STEP file from here opened in a 3D printing program at the right size. It has not been opened in Fusion or a CAM program, and nothing has been cut from it. Make a test cut in scrap first.'
+        : 'Not yet checked in the real world: an STL file from here has not been opened in Vectric Aspire or any other program, and nothing has been cut from it. Make a test cut in scrap first.'}</p>
 
       {inViewer() ? (
         <p className="note"><b>Saving a 3D model does not work inside claude.ai.</b> Use the copy of the Guitar Designer on the Black Chapel site.</p>
       ) : (
         <>
           <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 12 }}>
-            <button className="btn primary" disabled={!!busy} onClick={save}>{busy || 'Save 3D model (.step)'}</button>
+            <button className="btn primary" disabled={!!busy} onClick={save}>{busy || `Save 3D model (.${kind})`}</button>
             {result && <span role="status" style={{ color: result.ok ? 'var(--bone)' : 'var(--torch)', fontSize: 12.5, flex: '1 1 260px' }}>{result.message}</span>}
           </div>
           <p className="note">The first save fetches the 3D engine, a download of about 7 MB. After that, building the model takes a few seconds, and the page does not respond while it works.</p>

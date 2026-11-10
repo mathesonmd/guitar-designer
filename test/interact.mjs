@@ -449,7 +449,7 @@ await step('template files download: pack, SVG, PDF (Letter and A4) and DXF', as
   return Object.entries(files).map(([k, p]) => `${path.basename(p)} ${(fs.statSync(p).size / 1024).toFixed(0)} KB`).join(' · ');
 });
 
-await step('a 3D model of the body saves as a STEP file, with rolled or square edges; the 3D engine is fetched only then', async () => {
+await step('a 3D model of the body saves as STEP (rolled or square edges) and as STL; the 3D engine is fetched only then', async () => {
   await tab('3D'); await settle(1200);
   await page.click('.viewopts button:has-text("Save 3D model")');
   const dlg = page.locator('.dialog[aria-label="Save a 3D model of the body"]');
@@ -457,7 +457,7 @@ await step('a 3D model of the body saves as a STEP file, with rolled or square e
   const said = await dlg.innerText();
   assert(/arm bevel, as a flat cut/i.test(said) && /belly cut, as a smooth dish/i.test(said), 'the dialog lists the arm bevel and belly cut');
   assert(/Not in the file/i.test(said) && /does not say how deep/i.test(said), 'the dialog names the holes that are left out');
-  assert(/has not been opened in Vectric, Fusion/.test(said), 'the dialog says the file is unchecked in real programs');
+  assert(/has not been opened in Fusion or a CAM program/.test(said) && /Vectric Aspire does not/.test(said), 'the dialog says what the STEP file has and has not been checked in, and that Aspire does not open it');
   assert(fetched.length === 0, 'no 3D engine file was fetched before Save was clicked');
   await page.screenshot({ path: path.join(out, 'model3d-dialog.png') });
   const t0 = Date.now();
@@ -477,9 +477,19 @@ await step('a 3D model of the body saves as a STEP file, with rolled or square e
   const square = files.stepSquare.replace('.step', '-square.step'); fs.renameSync(files.stepSquare, square); files.stepSquare = square;
   assert(fetched.length === 3, 'the engine was not fetched again');
   assert(fs.statSync(files.stepSquare).size < fs.statSync(files.step).size, 'the square-edged file is the smaller one');
+  // STL, for programs that do not read STEP (rolled edges again)
+  await dlg.locator('label.check:has-text("Roll the edge roundovers") input').check();
+  await dlg.locator('.seg[aria-label="File type"] button:has-text("STL")').click();
+  const stlSaid = await dlg.innerText();
+  assert(/within 0\.02 mm of the true surface/.test(stlSaid) && /choose millimeters/.test(stlSaid), 'the STL choice states its facet tolerance and its units');
+  assert(/has not been opened in Vectric Aspire/.test(stlSaid), 'the STL choice says it is unchecked in Aspire');
+  files.stl = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.stl)")').click(), 120000);
+  const stl = fs.readFileSync(files.stl);
+  assert(stl.length === 84 + stl.readUInt32LE(80) * 50 && stl.readUInt32LE(80) > 10000, `binary STL with ${stl.readUInt32LE(80)} facets`);
+  assert(fetched.length === 3, 'the engine was not fetched again for the STL');
   await page.keyboard.press('Escape'); await settle(300);
   assert(await dlg.count() === 0, 'Escape closes the dialog');
-  return `rolled ${(fs.statSync(files.step).size / 1024).toFixed(0)} KB in ${(first / 1000).toFixed(1)} s (with the engine fetch) · square ${(fs.statSync(files.stepSquare).size / 1024).toFixed(0)} KB in ${(second / 1000).toFixed(1)} s`;
+  return `STL ${(stl.length / 1e6).toFixed(1)} MB, ${stl.readUInt32LE(80)} facets · rolled ${(fs.statSync(files.step).size / 1024).toFixed(0)} KB in ${(first / 1000).toFixed(1)} s (with the engine fetch) · square ${(fs.statSync(files.stepSquare).size / 1024).toFixed(0)} KB in ${(second / 1000).toFixed(1)} s`;
 });
 
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {

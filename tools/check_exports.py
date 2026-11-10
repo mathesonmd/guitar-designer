@@ -11,6 +11,8 @@
 # height 0 and the top at the body thickness, a true cylinder for every through hole where the design
 # puts it, the neck pocket's corner cylinders, and a flat floor at each pocket's depth. When the gmsh
 # Python package is installed it also opens the file with gmsh's STEP importer and measures it.
+# For the STL it reads the binary file itself: every facet edge has a partner (no gaps), the mesh is the
+# outline's true size and the body's thickness, and its volume matches what gmsh measured in the STEP.
 import sys, os, zipfile, json, math, re
 D = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'test-output', 'downloads')
 IN = 25.4
@@ -261,6 +263,7 @@ if not steps: print('  skip STEP checks: no 3D model was saved')
 else:
     curved = {('rolled' if 'rolled' in f else 'square'): step_report(f, 'rolled' in f) for f in steps}
     if len(curved) == 2: check(curved['rolled'] > curved['square'], 'the rolled-edge file carries the roundover surfaces the square-edged file lacks (%d against %d curved faces)' % (curved['rolled'], curved['square']))
+    gmsh_volume = {}
     try:
         import gmsh
     except Exception:
@@ -281,18 +284,62 @@ else:
                 xs.append(u ** 3 * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t ** 3 * P[3][0])
                 ys.append(u ** 3 * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t ** 3 * P[3][1])
         sq = [f for f in steps if 'square' in f]
-        for f in (sq or steps)[:1]:
+        for f in steps:
             gmsh.initialize(); gmsh.option.setNumber('General.Terminal', 0)
             gmsh.model.occ.importShapes(f); gmsh.model.occ.synchronize()
             vols = gmsh.model.getEntities(3)
             check(len(vols) == 1, 'gmsh opens %s as one solid' % os.path.basename(f))
             bb = gmsh.model.getBoundingBox(*vols[0]); vol = gmsh.model.occ.getMass(*vols[0])
             gmsh.finalize()
+            gmsh_volume['square' if 'square' in f else 'rolled'] = vol
             T = design['body']['thickness']
             contours = design['contours']['arm']['on'] or design['contours']['belly']['on']
             print('  gmsh: volume %.0f mm^3, box x %.3f to %.3f, y %.3f to %.3f, z %.3f to %.3f' % (vol, bb[0], bb[3], bb[1], bb[4], bb[2], bb[5]))
+            if f not in (sq or steps)[:1]: continue
             if contours: print('  (with an arm bevel or belly cut, gmsh reports a loose box around their curved faces, so only the volume is checked)')
             else: check(abs(bb[0] - min(xs)) < 0.01 and abs(bb[3] - max(xs)) < 0.01 and abs(bb[1] - min(ys)) < 0.01 and abs(bb[4] - max(ys)) < 0.01 and abs(bb[2]) < 0.01 and abs(bb[5] - T) < 0.01, 'gmsh measures the model at the outline\'s true size and the body thickness')
             check(0.5 * (max(xs) - min(xs)) * (max(ys) - min(ys)) * T < vol < (max(xs) - min(xs)) * (max(ys) - min(ys)) * T, 'gmsh volume is a believable share of the blank (%.0f%%)' % (100 * vol / ((max(xs) - min(xs)) * (max(ys) - min(ys)) * T)))
+# ---------- STL (3D model of the body as a mesh) ----------
+import struct
+stls = glob.glob(D + '/*-body.stl')
+if not stls: print('  skip STL checks: no STL was saved')
+for f in stls:
+    raw = open(f, 'rb').read()
+    n = struct.unpack_from('<I', raw, 80)[0]
+    print('STL', os.path.basename(f), n, 'facets, %.1f MB' % (len(raw) / 1e6))
+    check(len(raw) == 84 + 50 * n and not raw[:5] == b'solid', 'a well-formed binary STL')
+    edges = {}; vol = 0.0; lo = [1e9] * 3; hi = [-1e9] * 3
+    for i in range(n):
+        v = struct.unpack_from('<9f', raw, 84 + 50 * i + 12)
+        a, b, c = v[0:3], v[3:6], v[6:9]
+        vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6
+        for p in (a, b, c):
+            for k in range(3):
+                if p[k] < lo[k]: lo[k] = p[k]
+                if p[k] > hi[k]: hi[k] = p[k]
+        for p, q in ((a, b), (b, c), (c, a)):
+            if edges.get((q, p), 0) > 0:
+                edges[(q, p)] -= 1
+                if edges[(q, p)] == 0: del edges[(q, p)]
+            else: edges[(p, q)] = edges.get((p, q), 0) + 1
+    check(len(edges) == 0, 'the mesh is closed: every facet edge is shared with one neighbor (%d without)' % len(edges))
+    T = design['body']['thickness']
+    onodes = design['outline']['nodes']
+    if design['outline'].get('symmetric'):
+        m = len(onodes) - 1
+        full = [dict(onodes[0], x=0, ix=-onodes[0]['ox'], iy=onodes[0]['oy'])] + onodes[1:m] + [dict(onodes[m], x=0, ox=-onodes[m]['ix'], oy=onodes[m]['iy'])]
+        onodes = full + [dict(q, x=-q['x'], ix=-q['ox'], ox=-q['ix'], iy=q['oy'], oy=q['iy']) for q in reversed(full[1:m])]
+    ex, ey = [], []
+    for i, a in enumerate(onodes):
+        b = onodes[(i + 1) % len(onodes)]
+        P = [(a['x'], a['y']), (a['x'] + a['ox'], a['y'] + a['oy']), (b['x'] + b['ix'], b['y'] + b['iy']), (b['x'], b['y'])]
+        for j in range(2001):
+            t = j / 2000.0; u = 1 - t
+            ex.append(u ** 3 * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t ** 3 * P[3][0])
+            ey.append(u ** 3 * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t ** 3 * P[3][1])
+    check(abs(lo[0] - min(ex)) < 0.05 and abs(hi[0] - max(ex)) < 0.05 and abs(lo[1] - min(ey)) < 0.05 and abs(hi[1] - max(ey)) < 0.05, 'the mesh is the outline\'s true size: %.2f x %.2f mm (outline %.2f x %.2f)' % (hi[0] - lo[0], hi[1] - lo[1], max(ex) - min(ex), max(ey) - min(ey)))
+    check(abs(lo[2]) < 1e-4 and abs(hi[2] - T) < 1e-4, 'back at height 0, top at %.3f mm' % T)
+    if steps and gmsh_volume.get('rolled'): check(abs(vol / gmsh_volume['rolled'] - 1) < 1e-4, 'mesh volume %.0f mm^3 matches the STEP solid as gmsh measures it (%.0f), within %.4f%%' % (vol, gmsh_volume['rolled'], abs(vol / gmsh_volume['rolled'] - 1) * 100))
+    else: print('  mesh volume %.0f mm^3 (no gmsh measurement of the STEP to compare with)' % vol)
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)

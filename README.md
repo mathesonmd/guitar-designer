@@ -2,13 +2,13 @@
 
 A single-page web app for drawing a solid-body guitar, fitting an off-the-shelf bolt-on neck,
 placing pickups and hardware, and exporting true-size routing templates (DXF, SVG, tiled PDF) and a
-3D model of the body (STEP).
+3D model of the body (STEP or STL).
 
 ## Run, build, test
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 35 geometry and export tests (Node, no browser)
+    npm test               # 36 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -62,7 +62,7 @@ template geometry as JSON; those files are not part of this folder.
 - Round holes are written as true circles. Long straight edges are kept exactly; curves are fitted with
   lines and arcs to within 0.01 mm.
 
-## The 3D model (STEP)
+## The 3D model (STEP and STL)
 
 The app holds the body in two different 3D forms, on purpose:
 
@@ -76,7 +76,11 @@ The app holds the body in two different 3D forms, on purpose:
 
 The tests hold the two to the same volume within 0.1%, which checks each against the other.
 
-Known limits of the STEP file, all stated in the save dialog:
+The same CAD solid can also be saved as a binary STL for programs that do not read STEP (Vectric Aspire
+is one): a closed mesh whose flat facets stay within 0.02 mm of the true surface. STL records no units;
+the numbers are millimeters.
+
+Known limits of both files, all stated in the save dialog:
 
 - A roundover larger than the tightest outside curve of the outline cannot be rolled. Measured with the
   built-in outlines: the T-style rolls up to about 4 mm, the J-style about 6 mm, the double-cut 6.35 mm

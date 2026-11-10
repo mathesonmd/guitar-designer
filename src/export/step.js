@@ -1,4 +1,4 @@
-// The body as a true CAD solid, for saving as a STEP file. Unlike the sliced solid behind the 3D picture
+// The body as a true CAD solid, for saving as a STEP file (exact) or an STL file (a fine mesh of it). Unlike the sliced solid behind the 3D picture
 // (model/solid.js), every surface here is exact: the outline keeps its Bezier curves, the edge roundovers
 // are rolled fillets, pockets have vertical walls with true arcs in the corners and flat floors, and
 // round holes are true cylinders. The arm bevel is a flat plane and the belly cut is the same dish
@@ -183,4 +183,36 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true } = {}) {
 export async function toSTEP(rc, shape, name) {
   const blob = rc.exportSTEP([{ shape, name: name || 'Guitar body' }], { unit: 'MM', modelUnit: 'MM' });
   return blob.text();
+}
+
+// How closely the STL's flat facets follow the true surface: no farther than this, in millimeters.
+export const STL_TOLERANCE = 0.02;
+const STL_ANGLE = 0.2; // most a curved surface may turn between neighboring facets, in radians
+
+// The solid as a binary STL file: { data: Uint8Array, triangles }. STL has no units of its own; the
+// numbers are millimeters, like everything else. Facets with no area are dropped, so every edge of the
+// mesh is shared by exactly two facets.
+export function toSTL(shape) {
+  const { vertices: v, triangles: t } = shape.mesh({ tolerance: STL_TOLERANCE, angularTolerance: STL_ANGLE });
+  const keep = [];
+  for (let i = 0; i < t.length; i += 3) {
+    const a = t[i] * 3, b = t[i + 1] * 3, c = t[i + 2] * 3;
+    const ux = v[b] - v[a], uy = v[b + 1] - v[a + 1], uz = v[b + 2] - v[a + 2];
+    const wx = v[c] - v[a], wy = v[c + 1] - v[a + 1], wz = v[c + 2] - v[a + 2];
+    const nx = uy * wz - uz * wy, ny = uz * wx - ux * wz, nz = ux * wy - uy * wx, l = Math.hypot(nx, ny, nz);
+    if (l > 1e-12) keep.push([a, b, c, nx / l, ny / l, nz / l]);
+  }
+  const data = new Uint8Array(84 + keep.length * 50), view = new DataView(data.buffer);
+  const title = 'Black Chapel Guitar Designer: guitar body, units are millimeters';
+  for (let i = 0; i < title.length; i++) data[i] = title.charCodeAt(i);
+  view.setUint32(80, keep.length, true);
+  let o = 84;
+  for (const [a, b, c, nx, ny, nz] of keep) {
+    view.setFloat32(o, nx, true); view.setFloat32(o + 4, ny, true); view.setFloat32(o + 8, nz, true);
+    for (const [k, p] of [[12, a], [24, b], [36, c]]) {
+      view.setFloat32(o + k, v[p], true); view.setFloat32(o + k + 4, v[p + 1], true); view.setFloat32(o + k + 8, v[p + 2], true);
+    }
+    o += 50;
+  }
+  return { data, triangles: keep.length };
 }
