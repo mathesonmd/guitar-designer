@@ -122,8 +122,9 @@ export function holesLeftOut(g) {
 
 // Returns { shape, volume, valid, leftOut: [{ what, count }], roundTop, roundBack }.
 // `roundovers: false` leaves the body edges square (for rounding over by hand after the body is cut).
+// `pockets: false` leaves every pocket and hole out (for cutting them from the 2D CNC vectors instead).
 // Throws an Error with a plain-language message when a part of the body cannot be built.
-export function buildBodySolid(rc, oc, design, g, { roundovers = true } = {}) {
+export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets = true } = {}) {
   const T = design.body.thickness;
   const rT = roundovers ? Math.max(0, Math.min(design.body.roundTop || 0, T / 2 - 0.5)) : 0;
   const rB = roundovers ? Math.max(0, Math.min(design.body.roundBack || 0, T / 2 - 0.5)) : 0;
@@ -158,7 +159,7 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true } = {}) {
   const dish = bellyDish(design.contours.belly, T - 3);
   if (dish) tools.push(bellyBowl(rc, oc, dish, design.contours.belly));
 
-  for (const c of g.cuts) {
+  for (const c of pockets ? g.cuts : []) {
     const d = Math.min(c.depth, T);
     if (!(d > 0)) continue;
     const through = d >= T - EPS;
@@ -167,7 +168,7 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true } = {}) {
       : c.side === 'back' ? prism(shape, -PAST, d) : prism(shape, T - d, T + PAST));
   }
 
-  for (const h of g.holes) {
+  for (const h of pockets ? g.holes : []) {
     if (h.side === 'through') tools.push(rc.makeCylinder(h.d / 2, T + 2 * PAST, [h.x, h.y, -PAST], [0, 0, 1]));
   }
   if (tools.length) body = cutAll(rc, oc, body, tools);
@@ -176,7 +177,7 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true } = {}) {
   const valid = checker.IsValid();
   checker.delete();
   if (!valid) throw new Error('The 3D model came out with a flaw the engine could not repair, so it was not saved. Try leaving the edge roundovers out of the model.');
-  return { shape: body, volume: rc.measureVolume(body), valid, leftOut: holesLeftOut(g), roundTop: rT, roundBack: rB };
+  return { shape: body, volume: rc.measureVolume(body), valid, leftOut: pockets ? holesLeftOut(g) : [], roundTop: rT, roundBack: rB };
 }
 
 // The STEP file as text. Units are millimeters; z = 0 is the back face.

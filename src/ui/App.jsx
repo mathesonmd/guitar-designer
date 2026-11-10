@@ -195,7 +195,7 @@ export default function App() {
             <button role="menuitem" onClick={() => setDialog('starter')}>New from a starting shape…</button>
             <button role="menuitem" onClick={() => openRef.current.click()}>Open a design…<small>A .guitar.json file saved from here</small></button>
             <button role="menuitem" onClick={async () => toast((await saveFile(`${slug(design.name)}.guitar.json`, JSON.stringify(design, null, 1))).message)}>Save this design<small>Keeps everything, to open again later</small></button>
-            <button role="menuitem" onClick={() => setDialog('model3d')}>Save a 3D model…<small>The body as a STEP file for CAD and CAM</small></button>
+            <button role="menuitem" onClick={() => setDialog('model3d')}>Save files for CNC…<small>2D vectors for pockets, and a 3D model of the body</small></button>
             <div className="sep" />
             <button role="menuitem" onClick={() => setDialog('sources')}>Where the numbers come from</button>
           </Menu>

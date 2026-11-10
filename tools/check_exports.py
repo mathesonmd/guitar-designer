@@ -258,7 +258,11 @@ def step_report(path, rolled):
     check(not miss, 'a flat, level floor at the stated depth of every pocket (%d pockets)%s' % (len(want), '' if not miss else ': missing ' + ', '.join(miss)))
     curved = kinds.get('B_SPLINE_SURFACE_WITH_KNOTS', 0) + kinds.get('TOROIDAL_SURFACE', 0)
     return curved
-steps = sorted(glob.glob(D + '/*-body-*.step'))
+steps = sorted(f for f in glob.glob(D + '/*-body-*.step') if 'nopockets' not in f)
+for f in glob.glob(D + '/*-body-nopockets.step'):
+    bare = parse_step(open(f).read()); bk = [k for k, _ in bare.values()]
+    print('STEP', os.path.basename(f), len(bare), 'entities')
+    check(bk.count('MANIFOLD_SOLID_BREP') == 1 and bk.count('CYLINDRICAL_SURFACE') == 0, 'the contours-only model is one solid with no holes or pocket corners in it')
 if not steps: print('  skip STEP checks: no 3D model was saved')
 else:
     curved = {('rolled' if 'rolled' in f else 'square'): step_report(f, 'rolled' in f) for f in steps}
@@ -341,5 +345,45 @@ for f in stls:
     check(abs(lo[2]) < 1e-4 and abs(hi[2] - T) < 1e-4, 'back at height 0, top at %.3f mm' % T)
     if steps and gmsh_volume.get('rolled'): check(abs(vol / gmsh_volume['rolled'] - 1) < 1e-4, 'mesh volume %.0f mm^3 matches the STEP solid as gmsh measures it (%.0f), within %.4f%%' % (vol, gmsh_volume['rolled'], abs(vol / gmsh_volume['rolled'] - 1) * 100))
     else: print('  mesh volume %.0f mm^3 (no gmsh measurement of the STEP to compare with)' % vol)
+# ---------- CNC vectors (pockets and holes at true position) ----------
+packs = glob.glob(D + '/*-cnc-vectors.zip')
+if not packs: print('  skip CNC vector checks: no vector pack was saved')
+for f in packs:
+    cz = zipfile.ZipFile(f); cn = cz.namelist()
+    print('CNC', os.path.basename(f), cn)
+    check(cz.testzip() is None and any(n.endswith('-cnc-top.dxf') for n in cn) and 'READ-ME.txt' in cn, 'pack holds a top DXF and a read-me')
+    note = cz.read('READ-ME.txt').decode()
+    T = design['body']['thickness']; nk = design['neck']
+    heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
+    for side, sign in (('top', 1), ('back', -1)):
+        names = [n for n in cn if n.endswith('-cnc-%s.dxf' % side)]
+        if not names: print('  no %s file (nothing is cut from that side)' % side); continue
+        chead, cpolys = parse_dxf(cz.read(names[0]).decode())
+        check(chead.get('$INSUNITS') == '4', '%s file is in millimeters' % side)
+        layers = sorted(set(p['layer'] for p in cpolys))
+        check(all(l in note for l in layers), 'every layer of the %s file is explained in the read-me (%d layers)' % (side, len(layers)))
+        circs = [p for p in cpolys if p.get('circle')]
+        want = [(sign * sx, sy) for sy in (s0, s0 + nk['screwAlong']) for sx in (-sa, sa)]
+        got = [p for p in circs if p['layer'].startswith('THROUGH_NECK_SCREW')]
+        check(len(got) == 4 and all(any(abs(p['c'][0] - x) < 1e-4 and abs(p['c'][1] - y) < 1e-4 and abs(p['r'] - nk['screwBodyHole'] / 2) < 1e-4 for p in got) for x, y in want), '%s file: four neck screw circles at the positions and size the neck numbers give' % side)
+        check(all(any(abs(p['c'][0] - sign * c['x']) < 1e-4 and abs(p['c'][1] - c['y']) < 1e-4 and abs(p['r'] - c['d'] / 2) < 1e-4 for p in circs) for c in design['controls']), '%s file: control holes at their places%s' % (side, ' (mirrored across the centerline)' if sign < 0 else ''))
+        if side == 'top':
+            pk = [p for p in cpolys if p['layer'] == 'TOP_NECK_POCKET_%.2fMM_DEEP' % nk['pocketDepth']]
+            check(len(pk) == 1, 'neck pocket is on a layer named for its depth (%.2f mm)' % nk['pocketDepth'])
+            if pk:
+                e = expand(pk[0]); b = bbox(e)
+                check(abs(b[1] - heel) < 1e-4, 'neck pocket end wall is on the heel line (y = %.3f)' % heel)
+                low = [q for q in e if q[1] < heel + 1e-3]
+                check(abs((max(q[0] for q in low) - min(q[0] for q in low)) - (nk['heelWidth'] - 2 * nk['heelCornerR'])) < 0.02, 'no offset built in: the pocket end wall is the heel width less its two corner radii')
+            for i, pu in enumerate(design['pickups']):
+                check(any(('_%.2fMM_DEEP' % pu['depth']) in l and l.startswith('TOP_') for l in layers), 'pickup %d: a top layer at its depth, %.2f mm' % (i + 1, pu['depth']))
+        else:
+            for c in design['cavities']:
+                if c['side'] != 'back': continue
+                m = [p for p in cpolys if p['layer'].startswith('BACK_') and ('_%.2fMM_DEEP' % min(c['depth'], T)) in p['layer'] and not p.get('circle')]
+                # a rounded rectangle, possibly turned: its box is centered on it and its area does not change
+                bs = [(bbox(expand(p)), area(expand(p))) for p in m]
+                want_area = c['w'] * c['h'] - (4 - math.pi) * c['r'] ** 2
+                check(any(abs((b[0] + b[2]) / 2 + c['x']) < 0.02 and abs((b[1] + b[3]) / 2 - c['y']) < 0.02 and abs(ar - want_area) < 0.5 for b, ar in bs), 'back file: %s mirrored across the centerline, at its depth and size' % c['name'])
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)

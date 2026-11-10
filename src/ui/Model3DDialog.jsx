@@ -1,8 +1,10 @@
-// "Save a 3D model": builds the body as a true CAD solid and saves it as a STEP file (the exact
+// "Save files for CNC": the 2D vectors for pockets and holes, and the 3D model. It builds the body as a true CAD solid and saves it as a STEP file (the exact
 // solid) or an STL file (a fine mesh of the same solid, for programs that do not read STEP).
 import React, { useMemo, useState } from 'react';
 import { derive } from '../model/derive.js';
 import { buildBodySolid, holesLeftOut, toSTEP, toSTL, STL_TOLERANCE } from '../export/step.js';
+import { buildCncVectors, cncDXF, cncReadme } from '../export/cnc.js';
+import { makeZip } from '../export/zip.js';
 import { loadCadEngine } from './cadEngine.js';
 import { saveFile, slug, inViewer } from './files.js';
 import { fmtWithUnit } from '../core/units.js';
@@ -14,6 +16,9 @@ export default function Model3DDialog({ design, onClose, toast }) {
   const g = useMemo(() => derive(design, { tol: 0.005 }), [design]);
   const [roll, setRoll] = useState(true);
   const [kind, setKind] = useState('step'); // 'step' or 'stl'
+  const [withPockets, setWithPockets] = useState(true);
+  const [vecResult, setVecResult] = useState(null);
+  const vectors = useMemo(() => buildCncVectors(design, g), [design, g]);
   const [busy, setBusy] = useState('');
   const [result, setResult] = useState(null); // { ok, message }
   const T = design.body.thickness, u = design.units;
@@ -35,7 +40,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
       setBusy('Building the model…');
       await paint();
       let built;
-      try { built = buildBodySolid(cad.rc, cad.oc, design, g, { roundovers: roll }); } catch (e) {
+      try { built = buildBodySolid(cad.rc, cad.oc, design, g, { roundovers: roll, pockets: withPockets }); } catch (e) {
         throw new Error(e instanceof Error && e.message ? e.message : 'The 3D model could not be built from this design.');
       }
       const blob = kind === 'stl'
@@ -51,9 +56,29 @@ export default function Model3DDialog({ design, onClose, toast }) {
     setBusy('');
   };
 
+  const saveVectors = async () => {
+    const base = slug(design.name);
+    const names = vectors.files.map((f) => `${base}-cnc-${f.side}.dxf`);
+    const files = [{ name: 'READ-ME.txt', data: cncReadme(design, vectors, names) }, ...vectors.files.map((f, i) => ({ name: names[i], data: cncDXF(f) }))];
+    const res = await saveFile(`${base}-cnc-vectors.zip`, new Blob([makeZip(files)], { type: 'application/zip' }));
+    setVecResult(res);
+    toast(res.message);
+  };
+  const cutLayers = vectors.files.reduce((n, f) => n + f.layers.filter((L) => !/^(BODY_OUTLINE|GUIDE_)/.test(L.name)).length, 0);
+
   return (
-    <Dialog title="Save a 3D model of the body" onClose={onClose}>
-      <p>This saves the body as a 3D model for CAD and CAM programs. It is the body only. The neck and hardware in the 3D view are shown for looks and are not in the file.</p>
+    <Dialog title="Save files for CNC" onClose={onClose}>
+      <h4>2D vectors for pockets and holes</h4>
+      <p>Every pocket and hole as a 2D outline at its finished edge and true position, for pocketing and drilling in your CAM program. No bit or template offsets are built in. {vectors.files.length > 1 ? 'There is one DXF file for the top and one for the back; the back file is mirrored across the centerline, as the body looks once it is turned over.' : 'Nothing in this design is cut from the back, so there is one DXF file, for the top.'} Each of the {cutLayers} cutting layers is named for what it is and how deep it goes, and a read-me lists them all.</p>
+      <p className="note">Holes whose depth the design does not record are in the vectors as circles, on layers marked DEPTH_TO_SUIT. The vectors use the same origin as the 3D model: the centerline is x = 0 and the scale line is y = 0.</p>
+      <p className="note" style={{ color: 'var(--brass)' }}>Not yet checked in the real world: these vector files have not been opened in Vectric Aspire or any other program, and nothing has been cut from them.</p>
+      <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+        <button className="btn primary" onClick={saveVectors}>Save CNC vectors (.zip)</button>
+        {vecResult && <span role="status" style={{ color: vecResult.ok ? 'var(--bone)' : 'var(--torch)', fontSize: 12.5 }}>{vecResult.message}</span>}
+      </div>
+
+      <h4>3D model of the body</h4>
+      <p>The body as a 3D model for CAD and CAM programs. It is the body only. The neck and hardware in the 3D view are shown for looks and are not in the file.</p>
 
       <div style={{ margin: '12px 0 4px' }}>
         <Seg label="File type" value={kind} onChange={setKind} options={[{ value: 'step', label: 'STEP' }, { value: 'stl', label: 'STL' }]} />
@@ -62,7 +87,12 @@ export default function Model3DDialog({ design, onClose, toast }) {
           : `STL holds the same solid as a mesh of small flat facets that stay within ${STL_TOLERANCE} mm of the true surface. Vectric Aspire and 3D printing programs open it. An STL file does not record its units: this one is in millimeters, so choose millimeters if the program asks.`}</p>
       </div>
 
-      <h4>In the file</h4>
+      <div style={{ margin: '10px 0 4px' }}>
+        <Check checked={withPockets} onChange={setWithPockets}>Put the pockets and holes in the 3D model</Check>
+        <p className="note">Untick this to leave them out of the model and cut them from the 2D vectors above. The model then carries only the outline and the contours.</p>
+      </div>
+
+      <h4>In the 3D file</h4>
       <ul className="plain">
         <li>The body outline with its true curves, {both(T)} thick.</li>
         {hasRound && (roll
@@ -70,13 +100,14 @@ export default function Model3DDialog({ design, onClose, toast }) {
           : <li>Square edges. The roundovers are left for you to rout by hand.</li>)}
         {arm && <li>The arm bevel, as a flat cut.</li>}
         {belly && <li>The belly cut, as a smooth dish.</li>}
-        <li>{pockets.length} {pockets.length === 1 ? 'pocket' : 'pockets'} with upright walls, flat floors and true rounded corners: {pockets.map((c) => c.label).join(', ')}.</li>
-        <li>{through.length} round {through.length === 1 ? 'hole' : 'holes'} that go right through the body.</li>
+        {withPockets && <li>{pockets.length} {pockets.length === 1 ? 'pocket' : 'pockets'} with upright walls, flat floors and true rounded corners: {pockets.map((c) => c.label).join(', ')}.</li>}
+        {withPockets && <li>{through.length} round {through.length === 1 ? 'hole' : 'holes'} that go right through the body.</li>}
       </ul>
 
-      <h4>Not in the file</h4>
+      <h4>Not in the 3D file</h4>
       <ul className="plain">
-        {left.map((l) => <li key={l.what}>{l.what} ({l.count}). The design does not say how deep these go, so they are not drilled in the model. Mark them from the 2D templates.</li>)}
+        {!withPockets && <li>Pockets and holes. Cut them from the 2D vectors.</li>}
+        {withPockets && left.map((l) => <li key={l.what}>{l.what} ({l.count}). The design does not say how deep these go, so they are not drilled in the model. Mark them from the 2D templates.</li>)}
         <li>The neck, frets, bridge, pickups and knobs.</li>
       </ul>
 

@@ -118,3 +118,13 @@ test('the STL is a closed mesh of the same solid: every edge shared by two facet
   assert.ok(Math.abs(x1 - x0 - g.bbox.w) < 0.05 && Math.abs(y1 - y0 - g.bbox.h) < 0.05, `mesh is ${(x1 - x0).toFixed(3)} x ${(y1 - y0).toFixed(3)}, outline is ${g.bbox.w.toFixed(3)} x ${g.bbox.h.toFixed(3)}`);
   assert.ok(Math.abs(z0) < 1e-4 && Math.abs(z1 - d.body.thickness) < 1e-4, 'back at 0, top at the body thickness');
 });
+
+test('leaving pockets and holes out gives the outline and contours only', () => {
+  const d = defaultDesign(); d.contours.arm.on = true; d.contours.belly.on = true;
+  const g = derive(d, { tol: 0.005 });
+  const bare = buildBodySolid(rc, oc, d, g, { pockets: false });
+  const uncut = buildLayers(d, { ...g, cuts: [], holes: [] });
+  assert.ok(pct(bare.volume, uncut.volume) < 0.1, `volume differs from the uncut sliced body by ${pct(bare.volume, uncut.volume).toFixed(3)}%`);
+  assert.ok(bare.volume > buildBodySolid(rc, oc, d, g).volume + 100000, 'the pockets are a real amount of wood');
+  assert.deepEqual(bare.leftOut, []);
+});

@@ -149,7 +149,7 @@ export default function View3D({ design, g, solid, onSaveModel }) {
         <Seg label="View" value="" onChange={(v) => look(...{ front: [0, Math.PI / 2 - 0.001], back: [Math.PI, Math.PI / 2 - 0.001], angle: [-0.5, 1.22], edge: [Math.PI / 2, Math.PI / 2 - 0.001] }[v])}
           options={[{ value: 'angle', label: 'Angle' }, { value: 'front', label: 'Front' }, { value: 'back', label: 'Back' }, { value: 'edge', label: 'Edge' }]} />
         <div className="float" style={{ position: 'static' }}><Check checked={parts} onChange={setParts}>Neck and hardware</Check></div>
-        {onSaveModel && <button className="btn" onClick={onSaveModel}>Save 3D model…</button>}
+        {onSaveModel && <button className="btn" onClick={onSaveModel}>Save files for CNC…</button>}
       </div>
       <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>Neck and hardware are shown for looks</span></div>
     </div>

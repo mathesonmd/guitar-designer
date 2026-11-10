@@ -1,14 +1,14 @@
 # Black Chapel Guitar Designer
 
 A single-page web app for drawing a solid-body guitar, fitting an off-the-shelf bolt-on neck,
-placing pickups and hardware, and exporting true-size routing templates (DXF, SVG, tiled PDF) and a
-3D model of the body (STEP or STL).
+placing pickups and hardware, and exporting true-size routing templates (DXF, SVG, tiled PDF), 2D vectors
+for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP or STL).
 
 ## Run, build, test
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 36 geometry and export tests (Node, no browser)
+    npm test               # 43 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -31,7 +31,7 @@ The browser scripts need Playwright with Chromium installed; it is not listed in
 | `src/core` | Geometry with no guitar knowledge: Bézier outlines, polygon offsets and booleans, arc fitting, units, engraved lettering |
 | `src/data` | Every built-in number, each tagged with where it came from (`sources.js` lists the sources) |
 | `src/model` | The design document, derived geometry, build checks, the layered 3D solid, the template sheets |
-| `src/export` | DXF, SVG, PDF and zip writers, and the CAD solid for the STEP file |
+| `src/export` | DXF, SVG, PDF and zip writers, the CNC vectors, and the CAD solid for the STEP and STL files |
 | `src/ui` | The React interface |
 | `test` | Unit tests, the browser click-through, and the viewer check |
 | `tools` | `make_shop_data.mjs` regenerates `src/data/shop.js` from the class-template DXF geometry; `check_exports.py` independently measures saved files |
@@ -61,6 +61,24 @@ template geometry as JSON; those files are not part of this folder.
 - Back sheets are mirrored so they read correctly lying on the back of the body.
 - Round holes are written as true circles. Long straight edges are kept exactly; curves are fitted with
   lines and arcs to within 0.01 mm.
+
+## Files for CNC
+
+"Save files for CNC" (3D tab, or the File menu) offers two things meant to be used together.
+
+**2D vectors for pockets and holes** (`src/export/cnc.js`): a zip with one DXF for the top, one for the
+back when anything is cut there, and a read-me.
+
+- Every opening is at its finished edge and true position. No bit, bushing or kerf offsets.
+- The back file is mirrored across the centerline, as the body looks turned over like a page.
+- One layer per kind of cut, named for what it is and how deep it goes, for example
+  `TOP_NECK_POCKET_15.88MM_DEEP`, `THROUGH_NECK_SCREW_4.76MM_HOLE`,
+  `BACK_STRING_FERRULE_7.94MM_HOLE_DEPTH_TO_SUIT` (no depth is recorded for that hole).
+- `BODY_OUTLINE` and `GUIDE_CENTERLINE_AND_SCALE_LINE` are in both files for lining up.
+- Same origin as the 3D model: x = 0 is the centerline, y = 0 is the scale line.
+
+**The 3D model**, with or without the pockets and holes in it. Without them it carries only the outline
+and the contours, for 3D machining, while the pockets are cut from the vectors.
 
 ## The 3D model (STEP and STL)
 
