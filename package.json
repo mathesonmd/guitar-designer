@@ -1,0 +1,25 @@
+{
+  "name": "black-chapel-guitar-designer",
+  "version": "0.1.0",
+  "description": "Draw a solid-body guitar, fit a bolt-on neck, place pickups and hardware, and export true-size routing templates. Black Chapel Studios.",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "node build.mjs",
+    "test": "node --test test/core.test.mjs test/model.test.mjs",
+    "test:browser": "node build.mjs && node test/interact.mjs && node test/viewer.mjs"
+  },
+  "dependencies": {
+    "clipper-lib": "6.4.2",
+    "jspdf": "2.5.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "three": "0.147.0"
+  },
+  "devDependencies": {
+    "esbuild": "0.23.0"
+  }
+}

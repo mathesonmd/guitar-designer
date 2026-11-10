@@ -1,0 +1,284 @@
+import React, { useRef } from 'react';
+import { Len, Num, Seg, Check, Row, Acc, Basis } from './widgets.jsx';
+import { NECK_PRESETS, NECK_FIELDS } from '../data/necks.js';
+import { BRIDGES } from '../data/bridges.js';
+import { PICKUPS } from '../data/pickups.js';
+import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
+import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis } from '../model/design.js';
+import { setSymmetric } from '../core/path.js';
+import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
+import { toolOffset, defaultRegHoles } from '../model/templates.js';
+
+const DEG = 180 / Math.PI;
+
+export default function Panels({ design, g, sel, setSel, change, onStarter, onAddGhost, onTraceGhost, onImportFretboard, solid }) {
+  const u = design.units;
+  const fileRef = useRef(null), fbRef = useRef(null);
+  // change(fn) records one undo step
+  const set = (key, patch) => change((d) => ({ ...d, [key]: { ...d[key], ...patch } }));
+  const setItem = (key, id, patch) => change((d) => ({ ...d, [key]: d[key].map((q) => (q.id === id ? { ...q, ...patch } : q)) }));
+  const delItem = (key, id) => { change((d) => ({ ...d, [key]: d[key].filter((q) => q.id !== id) })); setSel(null); };
+  const nk = design.neck, preset = NECK_PRESETS[nk.preset] || NECK_PRESETS.custom;
+  const verified = design.verified || {};
+  const setNeck = (k, v) => change((d) => ({ ...d, neck: { ...d.neck, [k]: v } }));
+  const bdef = BRIDGES[design.bridge.type];
+  const tool = design.tooling;
+  const setTool = (which, patch) => change((d) => ({ ...d, tooling: { ...d.tooling, [which]: { ...d.tooling[which], ...patch } } }));
+
+  const basisFor = (key) => {
+    const b = neckBasis(design, key);
+    return b ? <Basis kind={b[0]} text={b[2]} src={b[1]} /> : null;
+  };
+
+  // plain function (not a component) so the fields keep focus while typing
+  const toolRows = (which, label) => {
+    const t = tool[which];
+    const off = toolOffset(t);
+    return (
+      <>
+        <Row label={label} wide>
+          <Seg wide label={label} value={t.mode} onChange={(v) => setTool(which, { mode: v })} options={[{ value: 'bearing', label: 'Bearing-guided bit' }, { value: 'bushing', label: 'Guide bushing' }]} />
+        </Row>
+        <Row label="Bit diameter" htmlFor={`bit-${which}`}>
+          <select aria-label="Common bit sizes" value="" onChange={(e) => e.target.value && setTool(which, { bit: +e.target.value })} style={{ width: 28, padding: '6px 2px' }}>
+            <option value="">…</option>{BITS.map((b) => <option key={b.label} value={b.mm}>{b.label}</option>)}
+          </select>
+          <Len id={`bit-${which}`} units={u} value={t.bit} min={1} max={40} onChange={(v) => setTool(which, { bit: v })} />
+        </Row>
+        {t.mode === 'bushing' && (
+          <>
+            <Row label="Bushing outside diameter" htmlFor={`bush-${which}`} basis={<Basis kind="published" text="Sizes in the common Porter-Cable-style sets: 5/16, 3/8, 7/16, 1/2, 5/8, 3/4 and 51/64 in. Measure yours; they vary slightly." src="amana" />}>
+              <select aria-label="Common bushing sizes" value="" onChange={(e) => e.target.value && setTool(which, { bushing: +e.target.value })} style={{ width: 28, padding: '6px 2px' }}>
+                <option value="">…</option>{BUSHINGS.map((b, i) => <option key={i} value={b.mm}>{BUSHING_LABELS[i]} in</option>)}
+              </select>
+              <Len id={`bush-${which}`} units={u} value={t.bushing} min={2} max={60} onChange={(v) => setTool(which, { bushing: v })} />
+            </Row>
+            <p className="note">{off > 0
+              ? <>Template edge sits <b>{fmtWithUnit(off, u)}</b> {which === 'outline' ? 'inside the body outline' : 'outside each cavity'}: (bushing − bit) ÷ 2.</>
+              : <b style={{ color: 'var(--torch)' }}>The bushing must be larger than the bit.</b>}</p>
+          </>
+        )}
+        {t.mode === 'bearing' && <p className="note">Template edge is the finished edge. Inside corners can be no tighter than the bit’s radius ({fmtWithUnit(t.bit / 2, u)}).</p>}
+      </>
+    );
+  };
+
+  return (
+    <aside className="panel" aria-label="Design controls">
+      <Acc id="shape" title="Body shape" hint={`${fmtLen(g.bbox.h, u)} × ${fmtLen(g.bbox.w, u)} ${unitLabel(u)}`} defaultOpen>
+        <Row label="Start from a shape"><button className="btn small" onClick={onStarter}>Choose…</button></Row>
+        <Row label="">
+          <Check id="sym" checked={design.outline.symmetric} onChange={(v) => change((d) => ({ ...d, outline: setSymmetric(d.outline, v) }))}>Mirror left and right</Check>
+        </Row>
+        <p className="note">Click the outline to show its points. Drag a point or its handles; double-click the line to add a point. Everything else stays put while you reshape.</p>
+        <h4 style={{ margin: '14px 0 2px', fontSize: 10, letterSpacing: '.16em', textTransform: 'uppercase', color: 'var(--bone-dim)' }}>Reference outlines</h4>
+        {design.ghosts.map((gh) => (
+          <div className="card" key={gh.id}>
+            <div className="head">
+              <Check checked={gh.visible !== false} onChange={(v) => setItem('ghosts', gh.id, { visible: v })}><span className="t">{gh.name}</span></Check>
+              <span style={{ flex: 1 }} />
+              <input type="range" min="0.1" max="1" step="0.05" aria-label={`${gh.name} opacity`} value={gh.opacity ?? 0.6} onChange={(e) => setItem('ghosts', gh.id, { opacity: +e.target.value })} style={{ width: 64 }} />
+              <button className="x" aria-label={`Remove ${gh.name}`} onClick={() => delItem('ghosts', gh.id)}>×</button>
+            </div>
+            {gh.image && (
+              <div className="body">
+                <Row label="Image width" htmlFor={`gw-${gh.id}`}><Len id={`gw-${gh.id}`} units={u} value={gh.w} min={10} max={3000} onChange={(v) => setItem('ghosts', gh.id, { w: v })} /></Row>
+                <Row label="Across"><Len units={u} value={gh.x || 0} onChange={(v) => setItem('ghosts', gh.id, { x: v })} /></Row>
+                <Row label="Along"><Len units={u} value={gh.y || 0} onChange={(v) => setItem('ghosts', gh.id, { y: v })} /></Row>
+                <Row label="Rotation"><Num value={gh.rot || 0} step={0.5} digits={1} suffix="°" min={-180} max={180} onChange={(v) => setItem('ghosts', gh.id, { rot: v })} /></Row>
+                <p className="note">Set the width to the real size of what the photo shows, then line it up with the centerline.</p>
+              </div>
+            )}
+            {!gh.image && <div className="body"><button className="btn small" style={{ marginTop: 8 }} onClick={() => onTraceGhost(gh)}>Use as my outline</button></div>}
+          </div>
+        ))}
+        <div className="addrow">
+          <button className="btn small" onClick={() => onAddGhost('builtin:tStyle')}>+ T-style</button>
+          <button className="btn small" onClick={() => onAddGhost('builtin:jStyle')}>+ J-style</button>
+          <button className="btn small" onClick={() => fileRef.current.click()}>+ Your file…</button>
+          <input ref={fileRef} type="file" accept=".svg,.dxf,.png,.jpg,.jpeg,.webp,image/*" hidden onChange={(e) => { if (e.target.files[0]) onAddGhost(e.target.files[0]); e.target.value = ''; }} />
+        </div>
+        <p className="note">Your file can be an SVG or DXF outline at true size, or a photo you scale to fit.</p>
+      </Acc>
+
+      <Acc id="neck" title="Neck" hint={`${fmtLen(nk.scale, u)} ${unitLabel(u)} scale`} defaultOpen>
+        <Row label="Neck standard" wide htmlFor="neck-preset">
+          <select id="neck-preset" value={nk.preset} onChange={(e) => change((d) => ({ ...d, neck: applyNeckPreset(d.neck, e.target.value) }))}>
+            {Object.entries(NECK_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+          </select>
+        </Row>
+        <p className="note">{preset.note}</p>
+        {NECK_FIELDS.map(([key, label]) => (
+          <Row key={key} label={label} htmlFor={`nk-${key}`} basis={basisFor(key)}>
+            {key === 'frets'
+              ? <Num id="nk-frets" value={nk.frets} min={12} max={27} onChange={(v) => setNeck('frets', Math.round(v))} />
+              : <Len id={`nk-${key}`} units={u} value={nk[key]} min={0} max={1200} onChange={(v) => change((d) => ({ ...d, neck: { ...d.neck, [key]: v, preset: preset.values[key] !== undefined && Math.abs(preset.values[key] - v) > 1e-6 ? 'custom' : d.neck.preset } }))} />}
+          </Row>
+        ))}
+        <p className="note">Pocket end to scale line: <b className="mono">{fmtWithUnit(g.heelY, u)}</b>. The pocket is cut to the heel’s width and corner radius.</p>
+        <div className="addrow">
+          <button className="btn small" onClick={() => fbRef.current.click()}>Load a Fretboard Designer file…</button>
+          <input ref={fbRef} type="file" accept=".json,application/json" hidden onChange={(e) => { if (e.target.files[0]) onImportFretboard(e.target.files[0]); e.target.value = ''; }} />
+        </div>
+      </Acc>
+
+      <Acc id="bridge" title="Bridge and strings" hint={bdef.label.split(',')[0].split('(')[0].trim()}>
+        <Row label="Bridge" wide htmlFor="bridge-type">
+          <select id="bridge-type" value={design.bridge.type} onChange={(e) => change((d) => ({ ...d, bridge: makeBridge(e.target.value) }))}>
+            {Object.entries(BRIDGES).map(([k, b]) => <option key={k} value={k}>{b.label}</option>)}
+          </select>
+        </Row>
+        <p className="note">{bdef.note} <Basis kind={bdef.basis} text={bdef.holeNote || bdef.note} src={bdef.src} /></p>
+        {Object.keys(bdef.params || {}).map((k) => (
+          <Row key={k} label={bdef.paramLabels[k]} htmlFor={`br-${k}`} basis={<Basis kind={bdef.paramBasis[k]} text={bdef.placementNote} src={bdef.src} />}>
+            <Len id={`br-${k}`} units={u} value={design.bridge.params[k]} min={-50} max={120} onChange={(v) => change((d) => ({ ...d, bridge: { ...d.bridge, params: { ...d.bridge.params, [k]: v } } }))} />
+          </Row>
+        ))}
+        {bdef.placementNote && <p className="note">{bdef.placementNote}</p>}
+        <Row label="Treble compensation" htmlFor="comp-t" basis={<Basis kind="assumed" text="How far behind the scale line the high-E saddle ends up. 0.030 in is the Fretboard Designer’s starting value; real intonation depends on strings and action." src="fretboardDesigner" />}>
+          <Len id="comp-t" units={u} value={design.compensation.treble} min={0} max={15} onChange={(v) => set('compensation', { treble: v })} />
+        </Row>
+        <Row label="Bass compensation" htmlFor="comp-b" basis={<Basis kind="assumed" text="How far behind the scale line the low-E saddle ends up. 0.090 in is the Fretboard Designer’s starting value." src="fretboardDesigner" />}>
+          <Len id="comp-b" units={u} value={design.compensation.bass} min={0} max={15} onChange={(v) => set('compensation', { bass: v })} />
+        </Row>
+        <Row label="Outer strings at the nut" htmlFor="nutspread" basis={<Basis kind="assumed" text="Distance between the two outer strings at the nut. 1.375 in is the Fretboard Designer’s default for a 1.650 in nut." src="fretboardDesigner" />}>
+          <Len id="nutspread" units={u} value={design.strings.nutSpread} min={20} max={70} onChange={(v) => set('strings', { nutSpread: v })} />
+        </Row>
+        <p className="note">Outer strings at the saddles: <b className="mono">{fmtWithUnit(g.saddleSpread, u)}</b></p>
+      </Acc>
+
+      <Acc id="pickups" title="Pickups" hint={`${design.pickups.length}`}>
+        {design.pickups.map((p) => {
+          const def = PICKUPS[p.type], on = sel && sel.id === p.id;
+          return (
+            <div className={'card' + (on ? ' sel' : '')} key={p.id}>
+              <div className="head" onClick={() => setSel(on ? null : { kind: 'pickup', id: p.id })}>
+                <span className="t">{def.label}</span><span className="s">{fmtLen(p.y, u)}</span>
+                <button className="x" aria-label={`Remove ${def.label}`} onClick={(e) => { e.stopPropagation(); delItem('pickups', p.id); }}>×</button>
+              </div>
+              {on && (
+                <div className="body">
+                  <Row label="Type" wide><select value={p.type} aria-label="Pickup type" onChange={(e) => setItem('pickups', p.id, { type: e.target.value, depth: PICKUPS[e.target.value].depth })}>{Object.entries(PICKUPS).map(([k, d]) => <option key={k} value={k}>{d.label}</option>)}</select></Row>
+                  <Row label="Center, from scale line" htmlFor={`pu-y-${p.id}`}><Len id={`pu-y-${p.id}`} units={u} value={p.y} min={-50} max={400} onChange={(v) => setItem('pickups', p.id, { y: v })} /></Row>
+                  <Row label="Off centerline" htmlFor={`pu-x-${p.id}`}><Len id={`pu-x-${p.id}`} units={u} value={p.x} min={-150} max={150} onChange={(v) => setItem('pickups', p.id, { x: v })} /></Row>
+                  {!def.fixedAngle && <Row label="Slant"><Num value={p.angle * DEG} step={1} digits={1} suffix="°" min={-45} max={45} onChange={(v) => setItem('pickups', p.id, { angle: v / DEG })} /></Row>}
+                  {def.hasFlip && <Row label=""><Check checked={p.flip} onChange={(v) => setItem('pickups', p.id, { flip: v })}>Wiring tab toward the neck</Check></Row>}
+                  {def.isCustom && <>
+                    <Row label="Cavity length"><Len units={u} value={p.len} min={5} max={200} onChange={(v) => setItem('pickups', p.id, { len: v })} /></Row>
+                    <Row label="Cavity width"><Len units={u} value={p.wid} min={5} max={120} onChange={(v) => setItem('pickups', p.id, { wid: v })} /></Row>
+                    <Row label="Corner radius"><Len units={u} value={p.rad} min={0} max={60} onChange={(v) => setItem('pickups', p.id, { rad: v })} /></Row>
+                  </>}
+                  <Row label="Cavity depth" htmlFor={`pu-d-${p.id}`} basis={<Basis kind={def.isCustom ? 'assumed' : 'published'} text={def.depthNote} src="warmothPickupRouts" />}><Len id={`pu-d-${p.id}`} units={u} value={p.depth} min={1} max={60} onChange={(v) => setItem('pickups', p.id, { depth: v })} /></Row>
+                  {def.pieces && <Row label="Leg pockets, extra depth" basis={<Basis kind="assumed" text="Warmoth cuts the leg pockets deeper than the main cavity for the height screws and springs, but does not publish a depth. Measure your pickup: Fralin humbuckers are 23 mm from cover top to the bottom of the legs." src={['warmothPickupRouts', 'fralin']} />}><Len units={u} value={p.legExtra} min={0} max={30} onChange={(v) => setItem('pickups', p.id, { legExtra: v })} /></Row>}
+                  <p className="note">{def.routeNote} <Basis kind={def.basis} text={def.bodyNote} src={def.src} /></p>
+                </div>
+              )}
+            </div>
+          );
+        })}
+        <div className="addrow">
+          {['humbucker', 'strat', 'teleNeck', 'tBridge', 'p90', 'slot', 'custom'].map((t) => (
+            <button key={t} className="btn small" onClick={() => { const p = makePickup(t); change((d) => ({ ...d, pickups: [...d.pickups, p] })); setSel({ kind: 'pickup', id: p.id }); }}>+ {PICKUPS[t].label.replace(' pickup', '')}</button>
+          ))}
+        </div>
+      </Acc>
+
+      <Acc id="controls" title="Controls and cavities" hint={`${design.controls.length} + ${design.cavities.length}`}>
+        {design.controls.map((c) => {
+          const on = sel && sel.id === c.id;
+          return (
+            <div className={'card' + (on ? ' sel' : '')} key={c.id}>
+              <div className="head" onClick={() => setSel(on ? null : { kind: 'control', id: c.id })}>
+                <span className="t">{CONTROL_KINDS[c.kind].label}</span><span className="s">{fmtLen(c.d, u)} hole</span>
+                <button className="x" aria-label="Remove control" onClick={(e) => { e.stopPropagation(); delItem('controls', c.id); }}>×</button>
+              </div>
+              {on && <div className="body">
+                <Row label="Hole diameter" basis={<Basis kind="assumed" text={CONTROL_NOTE} />}><Len units={u} value={c.d} min={2} max={30} onChange={(v) => setItem('controls', c.id, { d: v })} /></Row>
+                <Row label="Across"><Len units={u} value={c.x} onChange={(v) => setItem('controls', c.id, { x: v })} /></Row>
+                <Row label="Along"><Len units={u} value={c.y} onChange={(v) => setItem('controls', c.id, { y: v })} /></Row>
+              </div>}
+            </div>
+          );
+        })}
+        {design.cavities.map((c) => {
+          const on = sel && sel.id === c.id;
+          return (
+            <div className={'card' + (on ? ' sel' : '')} key={c.id}>
+              <div className="head" onClick={() => setSel(on ? null : { kind: 'cavity', id: c.id })}>
+                <span className="t">{c.name} (back)</span><span className="s">{fmtLen(c.depth, u)} deep</span>
+                <button className="x" aria-label="Remove cavity" onClick={(e) => { e.stopPropagation(); delItem('cavities', c.id); }}>×</button>
+              </div>
+              {on && <div className="body">
+                <Row label="Length"><Len units={u} value={c.h} min={10} max={300} onChange={(v) => setItem('cavities', c.id, { h: v })} /></Row>
+                <Row label="Width"><Len units={u} value={c.w} min={10} max={300} onChange={(v) => setItem('cavities', c.id, { w: v })} /></Row>
+                <Row label="Corner radius"><Len units={u} value={c.r} min={0} max={150} onChange={(v) => setItem('cavities', c.id, { r: v })} /></Row>
+                <Row label="Turn"><Num value={c.angle * DEG} step={1} digits={1} suffix="°" min={-180} max={180} onChange={(v) => setItem('cavities', c.id, { angle: v / DEG })} /></Row>
+                <Row label="Depth from the back" basis={<Basis kind="shop" text="Starts at body thickness minus 1/4 in: the Black Chapel T-style template routes controls 1.5 in deep in a 1.75 in body." src="shop" />}><Len units={u} value={c.depth} min={1} max={design.body.thickness} onChange={(v) => setItem('cavities', c.id, { depth: v })} /></Row>
+                <Row label=""><Check checked={c.cover} onChange={(v) => setItem('cavities', c.id, { cover: v })}>Recess for a cover plate</Check></Row>
+                {c.cover && <>
+                  <Row label="Ledge width" basis={<Basis kind="assumed" text="How far the recess extends past the cavity for the cover to sit on. A starting value: size it to your cover and screws." />}><Len units={u} value={c.ledge} min={1} max={30} onChange={(v) => setItem('cavities', c.id, { ledge: v })} /></Row>
+                  <Row label="Recess depth" basis={<Basis kind="assumed" text="Match the thickness of your cover material." />}><Len units={u} value={c.coverDepth} min={0.5} max={12} onChange={(v) => setItem('cavities', c.id, { coverDepth: v })} /></Row>
+                </>}
+              </div>}
+            </div>
+          );
+        })}
+        <div className="addrow">
+          {Object.entries(CONTROL_KINDS).map(([k, c]) => <button key={k} className="btn small" onClick={() => { const it = makeControl(k, 100, -40 - design.controls.length * 12); change((d) => ({ ...d, controls: [...d.controls, it] })); setSel({ kind: 'control', id: it.id }); }}>+ {c.label}</button>)}
+          <button className="btn small" onClick={() => { const it = makeCavity(95, -30, design.body.thickness); change((d) => ({ ...d, cavities: [...d.cavities, it] })); setSel({ kind: 'cavity', id: it.id }); }}>+ Back cavity</button>
+        </div>
+        <p className="note">{CONTROL_NOTE}</p>
+      </Acc>
+
+      <Acc id="body" title="Body" hint={`${fmtLen(design.body.thickness, u)} ${unitLabel(u)} thick`}>
+        <Row label="Thickness" htmlFor="b-thick" basis={<Basis kind="assumed" text="1-3/4 in is the usual solid-body blank. Set this to your blank." />}><Len id="b-thick" units={u} value={design.body.thickness} min={15} max={80} onChange={(v) => set('body', { thickness: v })} /></Row>
+        <Row label="Edge roundover, top" htmlFor="b-rt"><Len id="b-rt" units={u} value={design.body.roundTop} min={0} max={25} onChange={(v) => set('body', { roundTop: v })} /></Row>
+        <Row label="Edge roundover, back" htmlFor="b-rb"><Len id="b-rb" units={u} value={design.body.roundBack} min={0} max={25} onChange={(v) => set('body', { roundBack: v })} /></Row>
+        <Row label="Wood" htmlFor="b-wood" basis={<Basis kind="published" text="Average dried weight from The Wood Database. Individual boards vary a lot; weigh yours if the number matters." src="woodDb" />}>
+          <select id="b-wood" value={design.body.wood} onChange={(e) => set('body', { wood: e.target.value })}>{Object.entries(WOODS).map(([k, w]) => <option key={k} value={k}>{w.label}{w.lbft3 ? ` · ${w.lbft3} lb/ft³` : ''}</option>)}</select>
+        </Row>
+        {design.body.wood === 'custom' && <Row label="Density"><Num value={design.body.customDensity} min={100} max={1300} step={10} suffix="kg/m³" onChange={(v) => set('body', { customDensity: v })} /></Row>}
+        {(() => {
+          const setC = (key, patch) => change((d) => ({ ...d, contours: { ...d.contours, [key]: { ...d.contours[key], ...patch } } }));
+          const a = design.contours.arm, b = design.contours.belly;
+          const start = <Basis kind="assumed" text="A starting size. Body contours are shaped by eye and by feel: set this to what you want to carve." />;
+          return (
+            <>
+              <Row label=""><Check checked={a.on} onChange={(v) => setC('arm', { on: v })}>Arm bevel on the top</Check></Row>
+              {a.on && <Row label="Depth at the body edge" htmlFor="arm-drop" basis={start}><Len id="arm-drop" units={u} value={a.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('arm', { drop: v })} /></Row>}
+              {a.on && <p className="note">A flat cut between the two blue squares on the drawing, deepening toward the edge. Drag the squares to place it.</p>}
+              <Row label=""><Check checked={b.on} onChange={(v) => setC('belly', { on: v })}>Belly cut on the back</Check></Row>
+              {b.on && <Row label="Depth at the body edge" htmlFor="belly-drop" basis={start}><Len id="belly-drop" units={u} value={b.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('belly', { drop: v })} /></Row>}
+              {b.on && <Row label="Length along the edge" htmlFor="belly-len" basis={start}><Len id="belly-len" units={u} value={b.len} min={20} max={400} onChange={(v) => setC('belly', { len: v })} /></Row>}
+              {b.on && <p className="note">A shallow dish. Drag one blue square to the deepest point on the body edge and the other to where the cut fades out.</p>}
+              {(a.on || b.on) && <p className="note">Contours are carved by hand. The templates carry the guide lines and the depths to work to.</p>}
+            </>
+          );
+        })()}
+        {solid && <p className="note">Estimated body weight: <b className="mono">{(solid.mass * 2.20462).toFixed(2)} lb ({solid.mass.toFixed(2)} kg)</b> with every cavity cut.</p>}
+      </Acc>
+
+      <Acc id="routing" title="Routing setup" hint={tool.cavity.mode === 'bushing' || tool.outline.mode === 'bushing' ? 'bushing' : 'bearing bit'}>
+        {toolRows('outline', 'Body outline')}
+        <div style={{ height: 8 }} />
+        {toolRows('cavity', 'Cavities and neck pocket')}
+        <div style={{ height: 8 }} />
+        <Row label="Neck pocket template" wide>
+          <Seg wide label="Neck pocket template" value={tool.pocketSheet === 'own' ? 'own' : 'top'} onChange={(v) => change((d) => ({ ...d, tooling: { ...d.tooling, pocketSheet: v } }))}
+            options={[{ value: 'top', label: 'Notch in the top template' }, { value: 'own', label: 'Its own template' }]} />
+        </Row>
+        <p className="note">{tool.pocketSheet === 'own'
+          ? 'The pocket gets a separate template with a closed opening that runs past the body edge, so the router stays supported as the bit leaves the pocket. The top template keeps the full body outline. Sized like the Black Chapel J-style neck pocket template.'
+          : 'The pocket is a notch in the edge of the top template, as on the Black Chapel T-style master. When you trim the body outline, stop at each side of the notch: following it would cut the pocket right through the body.'}</p>
+        <div style={{ height: 8 }} />
+        <Row label="Laser kerf" htmlFor="kerf" basis={<Basis kind="assumed" text="The width of material your laser burns away. Leave at 0 to cut on the line, or enter your measured kerf and the template grows by half of it on the outside and shrinks by half on openings and holes." />}><Len id="kerf" units={u} value={tool.kerf} min={0} max={2} onChange={(v) => change((d) => ({ ...d, tooling: { ...d.tooling, kerf: v } }))} /></Row>
+        <Row label="Minimum wall to flag" htmlFor="minwall" basis={<Basis kind="assumed" text="Checks warn when less wood than this is left beside or under a cavity. It is your call, not a standard." />}><Len id="minwall" units={u} value={tool.minWall} min={0} max={40} onChange={(v) => change((d) => ({ ...d, tooling: { ...d.tooling, minWall: v } }))} /></Row>
+        <Row label=""><Check checked={(tool.regHoles || []).length > 0} onChange={(v) => change((d) => ({ ...d, tooling: { ...d.tooling, regHoles: v ? defaultRegHoles(d, g) : [] } }))}>Alignment pin holes</Check></Row>
+        {(tool.regHoles || []).length > 0 && <>
+          <Row label="Pin diameter" basis={<Basis kind="shop" text="The Black Chapel templates use 1/4 in pins on the centerline, placed where hardware or a pickguard hides the holes." src="shop" />}><Len units={u} value={tool.regPin} min={1} max={15} onChange={(v) => change((d) => ({ ...d, tooling: { ...d.tooling, regPin: v } }))} /></Row>
+          <p className="note">Drag the two blue crosshairs to spots that hardware, a pickguard or the fretboard will cover. The same holes are cut in every template, so each one needs solid template around it.</p>
+        </>}
+      </Acc>
+    </aside>
+  );
+}
