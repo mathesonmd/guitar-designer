@@ -1,0 +1,5 @@
+node_modules/
+dist/_viewer-test.html
+.DS_Store
+Thumbs.db
+test-output/
