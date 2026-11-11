@@ -5,7 +5,7 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import * as rc from 'replicad';
 import start from 'replicad-opencascadejs';
-import { defaultDesign, STARTERS, makeBridge } from '../src/model/design.js';
+import { defaultDesign, normalizeDesign, edgeRounds, STARTERS, makeBridge } from '../src/model/design.js';
 import { derive } from '../src/model/derive.js';
 import { buildLayers } from '../src/model/solid.js';
 import { buildBodySolid, holesLeftOut, toSTEP, toSTL } from '../src/export/step.js';
@@ -60,9 +60,9 @@ test('a roundover too large for the outline is refused in plain words, and squar
 test('holes with no stated depth are left out and named; through holes are in', () => {
   const d = defaultDesign(); d.bridge = makeBridge('tom');
   const g = derive(d, { tol: 0.005 });
-  assert.deepEqual(holesLeftOut(g), [{ what: 'Bridge and tailpiece post holes', count: 4 }]);
+  assert.deepEqual(holesLeftOut(g), [{ what: 'Bridge post holes', count: 2 }, { what: 'Tailpiece stud holes', count: 2 }]);
   const g0 = derive(defaultDesign(), { tol: 0.005 });
-  assert.deepEqual(holesLeftOut(g0).map((l) => l.what), ['Bridge screw pilot holes', 'String ferrule holes in the back']);
+  assert.deepEqual(holesLeftOut(g0).map((l) => l.what), ['Bridge screw holes', 'String ferrule holes']);
   // the sliced solid drills the posts 20 mm deep for the picture; the CAD solid must not
   const posts = 4 * Math.PI * (11.3 / 2) ** 2 * 20;
   const { cad, slices } = build(d);
@@ -127,4 +127,52 @@ test('leaving pockets and holes out gives the outline and contours only', () => 
   assert.ok(pct(bare.volume, uncut.volume) < 0.1, `volume differs from the uncut sliced body by ${pct(bare.volume, uncut.volume).toFixed(3)}%`);
   assert.ok(bare.volume > buildBodySolid(rc, oc, d, g).volume + 100000, 'the pockets are a real amount of wood');
   assert.deepEqual(bare.leftOut, []);
+});
+
+test('hole depths entered for the hardware are drilled in both solids, and those holes are no longer left out', () => {
+  const d = defaultDesign(); d.bridge = makeBridge('tom'); d.bridge.depths = { post: 22, tail: 18 };
+  const { g, cad, slices } = build(d);
+  assert.deepEqual(holesLeftOut(g), []);
+  assert.ok(pct(cad.volume, slices.volume) < 0.1);
+  const none = build(Object.assign(defaultDesign(), { bridge: makeBridge('tom') }));
+  const drilled = Math.PI * (11.3 / 2) ** 2 * (2 * 22 + 2 * 18);
+  assert.ok(Math.abs((none.cad.volume - cad.volume) - drilled) < 5, 'the wood removed is exactly the four holes at the depths entered');
+});
+
+test('the binding channel removes a ledge of its width and depth all around the top, the same in both solids', () => {
+  const d = defaultDesign(); d.body.roundTopOn = false; d.pickups = []; d.cavities = []; d.controls = []; d.bridge = makeBridge('none');
+  const before = build(d);
+  d.body.binding = { on: true, width: 2, depth: 7 };
+  const { g, cad, slices } = build(d);
+  assert.ok(pct(cad.volume, slices.volume) < 0.1, `volume differs by ${pct(cad.volume, slices.volume).toFixed(3)}%`);
+  const removed = before.cad.volume - cad.volume, removedSlices = before.slices.volume - slices.volume;
+  assert.ok(removed > 5000 && pct(removed, removedSlices) < 1, `ledge volume ${removed.toFixed(0)} against ${removedSlices.toFixed(0)} in the slices`);
+  assert.equal(g.binding.inner.length, 1);
+});
+
+test('roundover switches: off means a square edge; a binding channel takes the top edge; old files keep their roundovers', () => {
+  const d = defaultDesign();
+  assert.deepEqual(edgeRounds(d), { top: 3.175, back: 3.175 });
+  d.body.roundTopOn = false;
+  assert.deepEqual(edgeRounds(d), { top: 0, back: 3.175 });
+  const off = build(d), d0 = defaultDesign(); d0.body.roundTop = 0;
+  assert.ok(Math.abs(off.cad.volume - build(d0).cad.volume) < 1, 'switched off is the same solid as a zero radius');
+  d.body.roundTopOn = true; d.body.binding.on = true;
+  assert.equal(edgeRounds(d).top, 0);
+  const old = normalizeDesign({ schema: 'blackchapel.guitar/v1', body: { thickness: 44.45, roundTop: 6, roundBack: 3 }, outline: d.outline });
+  assert.deepEqual(edgeRounds(old), { top: 6, back: 3 });
+  assert.equal(old.body.binding.on, false);
+  assert.deepEqual(old.bridge.depths, {});
+});
+
+test('an inch STL is the same mesh with every coordinate divided by 25.4', () => {
+  const { cad } = build(defaultDesign());
+  const mm = toSTL(cad.shape).data, inch = toSTL(cad.shape, { units: 'in' }).data;
+  assert.equal(mm.length, inch.length);
+  const a = new DataView(mm.buffer), b = new DataView(inch.buffer);
+  for (let i = 0; i < 2000; i++) {
+    const o = 84 + i * 50 + 12 + (i % 9) * 4;
+    assert.ok(Math.abs(b.getFloat32(o, true) * 25.4 - a.getFloat32(o, true)) < 1e-3);
+  }
+  assert.match(String.fromCharCode(...inch.slice(0, 70)), /units are inches/);
 });

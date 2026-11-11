@@ -454,9 +454,11 @@ await step('a 3D model of the body saves as STEP (rolled or square edges) and as
   await page.click('.viewopts button:has-text("Save files for CNC")');
   const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
   await dlg.waitFor({ timeout: 3000 });
+  // the click-through's later checks read millimeter files
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
   const said = await dlg.innerText();
   assert(/arm bevel, as a flat cut/i.test(said) && /belly cut, as a smooth dish/i.test(said), 'the dialog lists the arm bevel and belly cut');
-  assert(/Not in the 3D file/i.test(said) && /does not say how deep/i.test(said), 'the dialog names the holes that are left out');
+  assert(/Not in the 3D file/i.test(said) && /No depth has been entered/i.test(said), 'the dialog names the holes that are left out');
   assert(/has not been opened in Fusion or a CAM program/.test(said) && /Vectric Aspire does not/.test(said), 'the dialog says what the STEP file has and has not been checked in, and that Aspire does not open it');
   assert(fetched.length === 0, 'no 3D engine file was fetched before Save was clicked');
   await page.screenshot({ path: path.join(out, 'model3d-dialog.png') });
@@ -488,12 +490,18 @@ await step('a 3D model of the body saves as STEP (rolled or square edges) and as
   files.cnc = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
   assert(fs.statSync(files.cnc).size > 5000, 'vector pack has content');
   assert(fetched.length === 3, 'saving vectors needs no engine');
+  // the same pack in inches
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Inches")').click();
+  assert(/written in inches/.test(await dlg.innerText()), 'the dialog says the files are in inches');
+  files.cncInch = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
+  const inchPack = files.cncInch.replace('.zip', '-inch.zip'); fs.renameSync(files.cncInch, inchPack); files.cncInch = inchPack;
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
   // STL, for programs that do not read STEP (rolled edges again)
   await dlg.locator('label.check:has-text("Roll the edge roundovers") input').check();
   await dlg.locator('.seg[aria-label="File type"] button:has-text("STL")').click();
   const stlSaid = await dlg.innerText();
   assert(/within 0\.02 mm of the true surface/.test(stlSaid) && /choose millimeters/.test(stlSaid), 'the STL choice states its facet tolerance and its units');
-  assert(/has not been opened in Vectric Aspire/.test(stlSaid), 'the STL choice says it is unchecked in Aspire');
+  assert(/millimeter STL from here opened in Vectric Aspire 12\.5/.test(stlSaid) && /Nothing has been cut/.test(stlSaid), 'the STL choice says what has and has not been checked');
   files.stl = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.stl)")').click(), 120000);
   const stl = fs.readFileSync(files.stl);
   assert(stl.length === 84 + stl.readUInt32LE(80) * 50 && stl.readUInt32LE(80) > 10000, `binary STL with ${stl.readUInt32LE(80)} facets`);
@@ -501,6 +509,43 @@ await step('a 3D model of the body saves as STEP (rolled or square edges) and as
   await page.keyboard.press('Escape'); await settle(300);
   assert(await dlg.count() === 0, 'Escape closes the dialog');
   return `STL ${(stl.length / 1e6).toFixed(1)} MB, ${stl.readUInt32LE(80)} facets · rolled ${(fs.statSync(files.step).size / 1024).toFixed(0)} KB in ${(first / 1000).toFixed(1)} s (with the engine fetch) · square ${(fs.statSync(files.stepSquare).size / 1024).toFixed(0)} KB in ${(second / 1000).toFixed(1)} s`;
+});
+
+await step('roundover switches, a binding channel and hole depths for the hardware change the body and what the CNC dialog says', async () => {
+  await tab('Design'); await settle(400);
+  await openSec('body');
+  const weight = async () => { await settle(900); return page.locator('section[data-sec="body"] .note:has-text("Estimated body weight")').innerText(); };
+  const w0 = await weight();
+  await page.locator('section[data-sec="body"] label.check:has-text("Round over the back edge") input').uncheck();
+  assert(await page.locator('#b-rb').count() === 0, 'the back radius field goes away when the roundover is off');
+  const w1 = await weight();
+  assert(w0 !== w1, 'weight changed when the back roundover was switched off');
+  await page.locator('section[data-sec="body"] label.check:has-text("Round over the back edge") input').check();
+  await page.locator('section[data-sec="body"] label.check:has-text("Binding channel around the top edge") input').check();
+  await setField('#bind-w', '2 mm'); await setField('#bind-d', '7 mm');
+  assert(await page.locator('.stage [data-k="binding"]').count() === 1, 'the channel\'s inner edge is drawn');
+  assert(/Left out while the binding channel is on/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the top roundover is left out');
+  const s1 = await state();
+  assert(s1.body.binding.on && Math.abs(s1.body.binding.width - 2) < 1e-6 && Math.abs(s1.body.binding.depth - 7) < 1e-6, 'binding stored');
+  await openSec('bridge');
+  const depthField = page.locator('section[data-sec="bridge"] input[id^="hd-"]').first();
+  const group = (await depthField.getAttribute('id')).slice(3);
+  await setField('#hd-' + group, '12 mm');
+  const s2 = await state();
+  assert(Math.abs(s2.bridge.depths[group] - 12) < 1e-6, 'hole depth stored');
+  await tab('3D'); await settle(1200);
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  const said = await dlg.innerText();
+  assert(/binding channel around the top edge, 2 mm/i.test(said), 'the dialog lists the binding channel: ' + said.slice(0, 80));
+  await page.keyboard.press('Escape');
+  // back to how it was, so later steps see the same body
+  await tab('Design'); await openSec('bridge'); await setField('#hd-' + group, '0');
+  await openSec('body');
+  await page.locator('section[data-sec="body"] label.check:has-text("Binding channel around the top edge") input').uncheck();
+  const s3 = await state();
+  assert(!s3.body.binding.on && !(group in s3.bridge.depths), 'binding off and depth cleared');
+  return `${w0.match(/[\d.]+ lb/)[0]} → ${w1.match(/[\d.]+ lb/)[0]} with the back edge square; binding 2 × 7 mm; ${group} holes 12 mm deep`;
 });
 
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {

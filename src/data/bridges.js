@@ -93,4 +93,19 @@ export const BRIDGES = {
   },
 };
 
+// Holes whose depth depends on the hardware in hand. The design holds one depth per group, entered by
+// the builder; until then the hole is a position and a diameter only.
+export const HOLE_DEPTH_GROUPS = {
+  mount: 'Bridge screw holes',
+  ferrule: 'String ferrule holes',
+  post: 'Bridge post holes',
+  tail: 'Tailpiece stud holes',
+};
+export function holeDepthGroup(h) {
+  if (h.kind === 'mount') return 'mount';
+  if (h.kind === 'ferrule') return 'ferrule';
+  if (h.kind === 'stud') return /tailpiece/i.test(h.label || '') ? 'tail' : 'post';
+  return null;
+}
+
 export const holePoly = (h, tol = 0.01) => circlePoly(h.x, h.y, h.d / 2, tol);

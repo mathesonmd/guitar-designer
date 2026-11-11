@@ -4,7 +4,8 @@ import { outlinePolygon } from '../core/path.js';
 import { bbox, filletPoly, place, roundRect, signedArea, centroid } from '../core/poly.js';
 import { offset, largestOuter } from '../core/clip.js';
 import { fretDistance, fretAt } from '../core/fret.js';
-import { BRIDGES } from '../data/bridges.js';
+import { BRIDGES, holeDepthGroup } from '../data/bridges.js';
+import { bindingChannel } from './design.js';
 import { PICKUPS } from '../data/pickups.js';
 import { CONTROL_KINDS } from '../data/parts.js';
 
@@ -71,7 +72,13 @@ export function derive(design, { tol = 0.02 } = {}) {
     id: 'neckscrew' + i, kind: 'neckscrew', label: 'Neck screw', side: 'through', x, y, d: nk.screwBodyHole,
   }));
 
-  bridge.holes.forEach((h, i) => holes.push({ ...h, id: 'bridge' + i }));
+  // bridge holes carry the builder's own depth for their group, or null while none has been entered
+  const depths = design.bridge.depths || {};
+  bridge.holes.forEach((h, i) => {
+    const group = holeDepthGroup(h);
+    const d = group && depths[group] > 0 ? Math.min(depths[group], design.body.thickness) : null;
+    holes.push({ ...h, id: 'bridge' + i, depthGroup: group, depth: d });
+  });
   for (const r of bridge.routes) cuts.push(r);
 
   const pickups = design.pickups.map((p) => {
@@ -118,12 +125,16 @@ export function derive(design, { tol = 0.02 } = {}) {
     return best === null ? null : { y: best, fret: fretAt(scale, nutY - best) };
   };
 
+  // binding channel: its inner edge is the outline moved in by the channel's width
+  const bind = bindingChannel(design);
+  const binding = bind ? { ...bind, inner: offset([outline], -bind.width, tol / 2).map((e) => e.outer) } : null;
+
   const area = Math.abs(signedArea(outline));
   return {
     outline, bbox: ob, area, centroid: centroid(outline),
     scale, nutY, heelY, boardEndY, neckHalf, pocketHalf,
     pocket, pocketTo, mouthY, fretboard, frets, strings, stringXAt, saddleSpread,
-    bridge, bridgeDef: bdef, pickups, cavities, cuts, holes,
+    bridge, bridgeDef: bdef, pickups, cavities, cuts, holes, binding,
     join: { treble: joinFret(1), bass: joinFret(-1) },
     heelToScale: heelY,
   };

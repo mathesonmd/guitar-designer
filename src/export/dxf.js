@@ -6,7 +6,8 @@ import { extentOf } from './prepare.js';
 const n = (v) => (Math.round(v * 1e5) / 1e5).toString();
 
 // `layers` defaults to the three template layers; the CNC vector files pass their own.
-export function toDXF(prep, layers = LAYERS) {
+// `units` is 'mm' or 'in': it only sets the header, the numbers are written as given.
+export function toDXF(prep, layers = LAYERS, units = 'mm') {
   const out = [];
   const g = (code, value) => { out.push(String(code)); out.push(String(value)); };
   const all = prep.sheets.flatMap((s) => s.paths);
@@ -14,8 +15,8 @@ export function toDXF(prep, layers = LAYERS) {
 
   g(0, 'SECTION'); g(2, 'HEADER');
   g(9, '$ACADVER'); g(1, 'AC1009');
-  g(9, '$INSUNITS'); g(70, 4);     // millimeters
-  g(9, '$MEASUREMENT'); g(70, 1);  // metric
+  g(9, '$INSUNITS'); g(70, units === 'in' ? 1 : 4);     // 1 = inches, 4 = millimeters
+  g(9, '$MEASUREMENT'); g(70, units === 'in' ? 0 : 1);  // 0 = imperial, 1 = metric
   g(9, '$EXTMIN'); g(10, n(ext.x0)); g(20, n(ext.y0)); g(30, 0);
   g(9, '$EXTMAX'); g(10, n(ext.x1)); g(20, n(ext.y1)); g(30, 0);
   g(0, 'ENDSEC');

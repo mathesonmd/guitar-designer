@@ -257,6 +257,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
           {bellyEdge && <path d={polyD(bellyEdge)} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="2 5" {...NS} clipPath="url(#bodyclip)" />}
           {bellyEdge && <path d={`M${design.contours.belly.x1} ${design.contours.belly.y1}L${design.contours.belly.x2} ${design.contours.belly.y2}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
 
+          {g.binding && g.binding.inner.map((p, i) => <path key={'bind' + i} d={polyD(p)} data-k="binding" stroke="var(--brass)" strokeWidth="1" strokeDasharray="5 3" fill="none" {...NS} />)}
           {show.cavities && <path d={polyD(g.pocket)} stroke="var(--bone-dim)" strokeWidth="1.2" fill="rgba(20,18,16,.55)" {...NS} clipPath="url(#bodyclip)" />}
           {show.cavities && g.cuts.filter((c) => c.side === 'top' && c.kind !== 'pocket').map((c) => (
             <path key={c.id} d={polyD(c.poly)} data-k={c.kind === 'pickup' ? 'pickup' : undefined} data-id={c.ref}

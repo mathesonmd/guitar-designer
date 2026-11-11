@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 43 geometry and export tests (Node, no browser)
+    npm test               # 51 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -76,6 +76,12 @@ back when anything is cut there, and a read-me.
   `BACK_STRING_FERRULE_7.94MM_HOLE_DEPTH_TO_SUIT` (no depth is recorded for that hole).
 - `BODY_OUTLINE` and `GUIDE_CENTERLINE_AND_SCALE_LINE` are in both files for lining up.
 - Same origin as the 3D model: x = 0 is the centerline, y = 0 is the scale line.
+- Written in millimeters or inches, as chosen in the dialog; layer names give sizes in the same unit.
+- Nothing reaches outside the body outline's box unless the neck pocket has to (the read-me says when),
+  so a CAM program that centers the vectors and the 3D model puts them in register.
+- A hole takes its depth from what the builder enters under Bridge and strings; with none entered its
+  layer ends `DEPTH_TO_SUIT`.
+- A binding channel adds its inner edge on a layer naming its width and depth.
 
 **The 3D model**, with or without the pockets and holes in it. Without them it carries only the outline
 and the contours, for 3D machining, while the pockets are cut from the vectors.
@@ -103,8 +109,8 @@ Known limits of both files, all stated in the save dialog:
 - A roundover larger than the tightest outside curve of the outline cannot be rolled. Measured with the
   built-in outlines: the T-style rolls up to about 4 mm, the J-style about 6 mm, the double-cut 6.35 mm
   but not 12.7 mm. The save is refused with a plain message, and the "square edges" choice still works.
-- Holes whose depth the design does not record (bridge posts, string ferrules, bridge screw pilots) are
-  left out rather than drilled to a made-up depth.
+- Bridge post, tailpiece stud, string ferrule and bridge screw holes are drilled only once the builder
+  has entered a depth for them. No depth is ever filled in for them.
 - It is the body only. There is no neck yet.
 - It does not work inside a claude.ai artifact.
 - Building runs on the page's main thread, so the page pauses for a few seconds.

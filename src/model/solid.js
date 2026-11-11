@@ -4,6 +4,7 @@
 // z = 0 is the back face, z = thickness is the top face.
 import { offset, difference, toRegion, regionCentroid } from '../core/clip.js';
 import { WOODS } from '../data/parts.js';
+import { edgeRounds } from './design.js';
 
 const ROUND_STEPS = 8;
 const BEVEL_STEP = 1.0;
@@ -73,8 +74,8 @@ export function bellyDish(c, maxDrop = Infinity) {
 
 export function buildLayers(design, g) {
   const T = design.body.thickness;
-  const rT = Math.max(0, Math.min(design.body.roundTop || 0, T / 2 - 0.5));
-  const rB = Math.max(0, Math.min(design.body.roundBack || 0, T / 2 - 0.5));
+  const { top: rT, back: rB } = edgeRounds(design);
+  const bind = g.binding || null;
   const base = toRegion([g.outline]);
   const arm = bevelPlane(design.contours.arm, g.outline, g.centroid);
   const dish = bellyDish(design.contours.belly, T - 3);
@@ -89,6 +90,7 @@ export function buildLayers(design, g) {
   for (const h of g.holes) {
     const poly = circle(h.x, h.y, h.d / 2);
     if (h.side === 'through') removed.push({ poly, z0: 0, z1: T });
+    else if (h.depth > 0) removed.push(h.side === 'back' ? { poly, z0: 0, z1: Math.min(h.depth, T) } : { poly, z0: T - Math.min(h.depth, T), z1: T });
     else if (h.kind === 'stud') removed.push({ poly, z0: T - Math.min(20, T - 2), z1: T }); // nominal depth, 3D picture only
     else if (h.kind === 'ferrule') removed.push({ poly, z0: 0, z1: Math.min(8, T - 2) }); // nominal depth, 3D picture only
   }
@@ -97,6 +99,7 @@ export function buildLayers(design, g) {
   const zs = new Set([0, T]);
   const add = (z) => { if (z > 1e-6 && z < T - 1e-6) zs.add(Math.round(z * 1e4) / 1e4); };
   for (const r of removed) { add(r.z0); add(r.z1); }
+  if (bind) add(T - bind.depth);
   const topBand = [], backBand = [];
   if (rT > 0.05) for (let i = 0; i <= ROUND_STEPS; i++) { const th = (i / ROUND_STEPS) * (Math.PI / 2); const z = T - rT + rT * Math.sin(th); topBand.push({ z, th }); add(z); }
   if (rB > 0.05) for (let i = 0; i <= ROUND_STEPS; i++) { const th = (i / ROUND_STEPS) * (Math.PI / 2); const z = rB - rB * Math.sin(th); backBand.push({ z, th }); add(z); }
@@ -127,6 +130,8 @@ export function buildLayers(design, g) {
       inset = rB * (1 - Math.cos((th0 + th1) / 2));
       tag.round = { th0, th1, dir: -1, inset };
     }
+    // the binding channel is a square ledge: above its floor the body is narrower by the channel's width
+    if (bind && zm > T - bind.depth) inset = Math.max(inset, bind.width);
     let region = insetRegion(inset);
     if (arm && zm > T - arm.drop) {
       const lim = (T - zm) / arm.slope;

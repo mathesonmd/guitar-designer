@@ -385,5 +385,15 @@ for f in packs:
                 bs = [(bbox(expand(p)), area(expand(p))) for p in m]
                 want_area = c['w'] * c['h'] - (4 - math.pi) * c['r'] ** 2
                 check(any(abs((b[0] + b[2]) / 2 + c['x']) < 0.02 and abs((b[1] + b[3]) / 2 - c['y']) < 0.02 and abs(ar - want_area) < 0.5 for b, ar in bs), 'back file: %s mirrored across the centerline, at its depth and size' % c['name'])
+for f in glob.glob(D + '/*-cnc-vectors-inch.zip'):
+    iz = zipfile.ZipFile(f)
+    ihead, ipolys = parse_dxf(iz.read([n for n in iz.namelist() if n.endswith('-cnc-top.dxf')][0]).decode())
+    print('CNC', os.path.basename(f))
+    check(ihead.get('$INSUNITS') == '1', 'inch pack: the top file says it is in inches')
+    nk = design['neck']; r_in = nk['screwBodyHole'] / 2 / IN
+    sc = [p for p in ipolys if p.get('circle') and p['layer'].startswith('THROUGH_NECK_SCREW')]
+    heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
+    check(len(sc) == 4 and all(abs(p['r'] - r_in) < 1e-5 for p in sc) and any(abs(p['c'][0] - sa / IN) < 1e-4 and abs(p['c'][1] - s0 / IN) < 1e-4 for p in sc), 'inch pack: neck screw circles are %.4f in across, at the neck\'s positions in inches' % (2 * r_in))
+    check(any(p['layer'] == 'TOP_NECK_POCKET_%.4fIN_DEEP' % (nk['pocketDepth'] / IN) for p in ipolys), 'inch pack: the neck pocket layer gives its depth in inches (%.4f)' % (nk['pocketDepth'] / IN))
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)

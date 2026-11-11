@@ -1,7 +1,7 @@
 import React, { useRef } from 'react';
 import { Len, Num, Seg, Check, Row, Acc, Basis } from './widgets.jsx';
 import { NECK_PRESETS, NECK_FIELDS } from '../data/necks.js';
-import { BRIDGES } from '../data/bridges.js';
+import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
 import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis } from '../model/design.js';
@@ -135,6 +135,26 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
           </Row>
         ))}
         {bdef.placementNote && <p className="note">{bdef.placementNote}</p>}
+        {(() => {
+          const groups = [...new Set(g.holes.map((h) => h.depthGroup).filter(Boolean))];
+          if (!groups.length) return null;
+          const depths = design.bridge.depths || {};
+          const setDepth = (k, v) => change((d) => {
+            const next = { ...(d.bridge.depths || {}) };
+            if (v > 0) next[k] = v; else delete next[k];
+            return { ...d, bridge: { ...d.bridge, depths: next } };
+          });
+          return (
+            <>
+              {groups.map((k) => (
+                <Row key={k} label={`${HOLE_DEPTH_GROUPS[k]}: depth`} htmlFor={`hd-${k}`}>
+                  <Len id={`hd-${k}`} units={u} value={depths[k] || 0} min={0} max={design.body.thickness} onChange={(v) => setDepth(k, v)} />
+                </Row>
+              ))}
+              <p className="note">Hole depths depend on the hardware you bought, so none is filled in. Measure your part and enter the depth. While a depth is 0 the hole is marked but not drilled in the 3D model, and its CNC layer says “depth to suit”.</p>
+            </>
+          );
+        })()}
         <Row label="Treble compensation" htmlFor="comp-t" basis={<Basis kind="assumed" text="How far behind the scale line the high-E saddle ends up. 0.030 in is the Fretboard Designer’s starting value; real intonation depends on strings and action." src="fretboardDesigner" />}>
           <Len id="comp-t" units={u} value={design.compensation.treble} min={0} max={15} onChange={(v) => set('compensation', { treble: v })} />
         </Row>
@@ -232,8 +252,24 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
 
       <Acc id="body" title="Body" hint={`${fmtLen(design.body.thickness, u)} ${unitLabel(u)} thick`}>
         <Row label="Thickness" htmlFor="b-thick" basis={<Basis kind="assumed" text="1-3/4 in is the usual solid-body blank. Set this to your blank." />}><Len id="b-thick" units={u} value={design.body.thickness} min={15} max={80} onChange={(v) => set('body', { thickness: v })} /></Row>
-        <Row label="Edge roundover, top" htmlFor="b-rt"><Len id="b-rt" units={u} value={design.body.roundTop} min={0} max={25} onChange={(v) => set('body', { roundTop: v })} /></Row>
-        <Row label="Edge roundover, back" htmlFor="b-rb"><Len id="b-rb" units={u} value={design.body.roundBack} min={0} max={25} onChange={(v) => set('body', { roundBack: v })} /></Row>
+        {(() => {
+          const bd = design.body.binding, topOn = design.body.roundTopOn !== false, backOn = design.body.roundBackOn !== false;
+          const setB = (patch) => set('body', { binding: { ...bd, ...patch } });
+          const size = <Basis kind="assumed" text="A starting size only. Binding strip comes in many sizes: measure the strip you have. Its thickness is the channel’s width and its height is the channel’s depth." />;
+          return (
+            <>
+              <Row label=""><Check checked={topOn} onChange={(v) => set('body', { roundTopOn: v })}>Round over the top edge</Check></Row>
+              {topOn && <Row label="Top roundover radius" htmlFor="b-rt"><Len id="b-rt" units={u} value={design.body.roundTop} min={0} max={25} onChange={(v) => set('body', { roundTop: v })} /></Row>}
+              {topOn && bd.on && <p className="note">Left out while the binding channel is on: the channel takes the top edge.</p>}
+              <Row label=""><Check checked={backOn} onChange={(v) => set('body', { roundBackOn: v })}>Round over the back edge</Check></Row>
+              {backOn && <Row label="Back roundover radius" htmlFor="b-rb"><Len id="b-rb" units={u} value={design.body.roundBack} min={0} max={25} onChange={(v) => set('body', { roundBack: v })} /></Row>}
+              <Row label=""><Check checked={bd.on} onChange={(v) => setB({ on: v })}>Binding channel around the top edge</Check></Row>
+              {bd.on && <Row label="Channel width" htmlFor="bind-w" basis={size}><Len id="bind-w" units={u} value={bd.width} min={0.5} max={10} onChange={(v) => setB({ width: v })} /></Row>}
+              {bd.on && <Row label="Channel depth" htmlFor="bind-d" basis={size}><Len id="bind-d" units={u} value={bd.depth} min={0.5} max={design.body.thickness - 3} onChange={(v) => setB({ depth: v })} /></Row>}
+              {bd.on && <p className="note">A square ledge all the way around the top, set in from the body outline by its width. It is in the 3D view, the 3D model and the CNC vectors. It is not on the routing templates.</p>}
+            </>
+          );
+        })()}
         <Row label="Wood" htmlFor="b-wood" basis={<Basis kind="published" text="Average dried weight from The Wood Database. Individual boards vary a lot; weigh yours if the number matters." src="woodDb" />}>
           <select id="b-wood" value={design.body.wood} onChange={(e) => set('body', { wood: e.target.value })}>{Object.entries(WOODS).map(([k, w]) => <option key={k} value={k}>{w.label}{w.lbft3 ? ` · ${w.lbft3} lb/ft³` : ''}</option>)}</select>
         </Row>

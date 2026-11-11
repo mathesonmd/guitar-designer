@@ -10,6 +10,8 @@ import { expandOutline, segmentsOf } from '../core/path.js';
 import { fitArcs } from '../core/arcfit.js';
 import { signedArea, centroid } from '../core/poly.js';
 import { bevelPlane, bellyDish } from '../model/solid.js';
+import { edgeRounds } from '../model/design.js';
+import { HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 
 const PAST = 5; // how far a cutting shape runs past the face it enters, so no two faces coincide
 const EPS = 1e-6;
@@ -113,8 +115,8 @@ function cutAll(rc, oc, body, tools) {
 export function holesLeftOut(g) {
   const skipped = new Map();
   for (const h of g.holes) {
-    if (h.side === 'through') continue;
-    const what = NO_DEPTH[h.kind] || h.label || 'Other holes';
+    if (h.side === 'through' || h.depth > 0) continue;
+    const what = HOLE_DEPTH_GROUPS[h.depthGroup] || NO_DEPTH[h.kind] || h.label || 'Other holes';
     skipped.set(what, (skipped.get(what) || 0) + 1);
   }
   return [...skipped].map(([what, count]) => ({ what, count }));
@@ -126,8 +128,8 @@ export function holesLeftOut(g) {
 // Throws an Error with a plain-language message when a part of the body cannot be built.
 export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets = true } = {}) {
   const T = design.body.thickness;
-  const rT = roundovers ? Math.max(0, Math.min(design.body.roundTop || 0, T / 2 - 0.5)) : 0;
-  const rB = roundovers ? Math.max(0, Math.min(design.body.roundBack || 0, T / 2 - 0.5)) : 0;
+  const rounds = edgeRounds(design);
+  const rT = roundovers ? rounds.top : 0, rB = roundovers ? rounds.back : 0;
 
   let body = prism(drawOutline(rc, design.outline), 0, T);
   // Roll one loop of the slab's edges at a time: all the level edges at height z.
@@ -159,6 +161,14 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
   const dish = bellyDish(design.contours.belly, T - 3);
   if (dish) tools.push(bellyBowl(rc, oc, dish, design.contours.belly));
 
+  // binding channel: everything outside its inner edge, from the channel floor up
+  if (g.binding && g.binding.inner.length) {
+    const b = g.bbox, m = 20, zf = T - g.binding.depth;
+    let ring = prism(rc.drawRoundedRectangle(b.w + 2 * m, b.h + 2 * m).translate(b.x0 + b.w / 2, b.y0 + b.h / 2), zf, T + PAST);
+    for (const inner of g.binding.inner) ring = ring.cut(prism(drawVerts(rc, fitArcs(inner, 0.01, true)), zf - PAST, T + 2 * PAST));
+    tools.push(ring);
+  }
+
   for (const c of pockets ? g.cuts : []) {
     const d = Math.min(c.depth, T);
     if (!(d > 0)) continue;
@@ -170,6 +180,10 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
 
   for (const h of pockets ? g.holes : []) {
     if (h.side === 'through') tools.push(rc.makeCylinder(h.d / 2, T + 2 * PAST, [h.x, h.y, -PAST], [0, 0, 1]));
+    else if (h.depth > 0) {
+      const d = Math.min(h.depth, T);
+      tools.push(h.side === 'back' ? rc.makeCylinder(h.d / 2, d + PAST, [h.x, h.y, -PAST], [0, 0, 1]) : rc.makeCylinder(h.d / 2, d + PAST, [h.x, h.y, T - d], [0, 0, 1]));
+    }
   }
   if (tools.length) body = cutAll(rc, oc, body, tools);
   // the engine's own check that the result is a sound, closed solid
@@ -191,9 +205,10 @@ export const STL_TOLERANCE = 0.02;
 const STL_ANGLE = 0.2; // most a curved surface may turn between neighboring facets, in radians
 
 // The solid as a binary STL file: { data: Uint8Array, triangles }. STL has no units of its own; the
-// numbers are millimeters, like everything else. Facets with no area are dropped, so every edge of the
-// mesh is shared by exactly two facets.
-export function toSTL(shape) {
+// numbers are millimeters unless `units` is 'in', when every coordinate is divided by 25.4. Facets with
+// no area are dropped, so every edge of the mesh is shared by exactly two facets.
+export function toSTL(shape, { units = 'mm' } = {}) {
+  const k = units === 'in' ? 1 / 25.4 : 1;
   const { vertices: v, triangles: t } = shape.mesh({ tolerance: STL_TOLERANCE, angularTolerance: STL_ANGLE });
   const keep = [];
   for (let i = 0; i < t.length; i += 3) {
@@ -204,14 +219,14 @@ export function toSTL(shape) {
     if (l > 1e-12) keep.push([a, b, c, nx / l, ny / l, nz / l]);
   }
   const data = new Uint8Array(84 + keep.length * 50), view = new DataView(data.buffer);
-  const title = 'Black Chapel Guitar Designer: guitar body, units are millimeters';
+  const title = `Black Chapel Guitar Designer: guitar body, units are ${units === 'in' ? 'inches' : 'millimeters'}`;
   for (let i = 0; i < title.length; i++) data[i] = title.charCodeAt(i);
   view.setUint32(80, keep.length, true);
   let o = 84;
   for (const [a, b, c, nx, ny, nz] of keep) {
     view.setFloat32(o, nx, true); view.setFloat32(o + 4, ny, true); view.setFloat32(o + 8, nz, true);
-    for (const [k, p] of [[12, a], [24, b], [36, c]]) {
-      view.setFloat32(o + k, v[p], true); view.setFloat32(o + k + 4, v[p + 1], true); view.setFloat32(o + k + 8, v[p + 2], true);
+    for (const [at, p] of [[12, a], [24, b], [36, c]]) {
+      view.setFloat32(o + at, v[p] * k, true); view.setFloat32(o + at + 4, v[p + 1] * k, true); view.setFloat32(o + at + 8, v[p + 2] * k, true);
     }
     o += 50;
   }

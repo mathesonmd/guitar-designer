@@ -35,9 +35,10 @@ test('pockets are at the finished edge and true position, on layers that carry t
   assert.equal(pocket[0].layer, `TOP_NECK_POCKET_${d.neck.pocketDepth.toFixed(2)}MM_DEEP`);
   const pb = box(pocket[0]);
   assert.ok(Math.abs(pb.y0 - g.heelY) < 1e-6, 'pocket end wall on the heel line');
-  assert.ok(pb.y1 > g.bbox.y1, 'the pocket runs past the body edge so the bit can leave');
-  // no offsets: the pocket is exactly the derived pocket
-  assert.ok(Math.abs(Math.abs(signedArea(expandArcs(pocket[0].verts, true))) - Math.abs(signedArea(g.pocket))) < 0.05);
+  assert.ok(Math.abs(pb.y1 - (g.mouthY + 12)) < 1e-6, 'the pocket runs 12 mm past the body edge it opens through, so the bit can leave');
+  // no offsets: the pocket is exactly the derived pocket, cut off at that height
+  assert.ok(Math.abs(Math.abs(signedArea(expandArcs(pocket[0].verts, true))) - Math.abs(signedArea(g.pocketTo(g.mouthY + 12)))) < 0.05);
+  assert.ok(Math.abs(pb.w - d.neck.heelWidth - (d.neck.mouthWidth - d.neck.heelWidth) * ((pb.y1 - g.heelY) / d.neck.pocketLength)) < 0.01, 'pocket width is the neck\'s, with nothing added');
   const singles = top.layers.find((L) => /^TOP_SINGLE_COIL/.test(L.name));
   assert.equal(singles.count, 2);
   assert.equal(singles.depth, d.pickups[1].depth);
@@ -80,4 +81,50 @@ test('the DXF lists every layer and writes circles as circles; the read-me names
   assert.match(text, /TOP_NECK_POCKET_15\.88MM_DEEP\r\n\s+Neck pocket: 15\.88 mm \(0\.6250 in\) deep/);
   assert.match(text, /does not record a depth/);
   assert.match(text, /have not been confirmed against a real neck/);
+});
+
+test('nothing reaches outside the body outline\'s box, so centering the vectors and the model lines them up', () => {
+  const { g, v } = make();
+  assert.equal(v.pocketOverrun, 0);
+  for (const f of v.files) {
+    const all = bbox(f.paths.flatMap((p) => expandArcs(p.verts, p.closed)));
+    const o = box(on(f, /^BODY_OUTLINE$/)[0]);
+    assert.ok(Math.abs(all.x0 - o.x0) < 0.02 && Math.abs(all.x1 - o.x1) < 0.02 && Math.abs(all.y0 - o.y0) < 0.02 && Math.abs(all.y1 - o.y1) < 0.02, `${f.side}: the file's box is the outline's box`);
+    assert.ok(Math.abs(o.w - g.bbox.w) < 0.02 && Math.abs(o.h - g.bbox.h) < 0.02);
+  }
+});
+
+test('inch files: every coordinate and size divided by 25.4, layer names and DXF header in inches', () => {
+  const d = defaultDesign(); const g = derive(d, { tol: 0.005 });
+  const mm = buildCncVectors(d, g), inch = buildCncVectors(d, g, { units: 'in' });
+  // the inch outline is expanded more finely: the helper's chord tolerance is in the file's own unit
+  const a = box(on(mm.files[0], /^BODY_OUTLINE$/)[0]), b = bbox(expandArcs(on(inch.files[0], /^BODY_OUTLINE$/)[0].verts, true, 0.0001));
+  assert.ok(Math.abs(b.w * 25.4 - a.w) < 0.01 && Math.abs(b.x0 * 25.4 - a.x0) < 0.01 && Math.abs(b.y1 * 25.4 - a.y1) < 0.01); // boxes are sampled from arcs
+  const cm = on(mm.files[0], /^THROUGH_NECK_SCREW/)[0].circle, ci = on(inch.files[0], /^THROUGH_NECK_SCREW/)[0].circle;
+  assert.ok(Math.abs(ci.r * 25.4 - cm.r) < 1e-9 && Math.abs(ci.x * 25.4 - cm.x) < 1e-9);
+  assert.ok(inch.files[0].layers.some((L) => L.name === 'TOP_NECK_POCKET_0.6250IN_DEEP'));
+  assert.ok(inch.files[0].layers.some((L) => L.name === 'THROUGH_NECK_SCREW_0.1875IN_HOLE'));
+  assert.match(cncDXF(inch.files[0], 'in'), /\$INSUNITS\r\n70\r\n1\r\n/);
+  assert.match(cncDXF(inch.files[0], 'in'), /\$MEASUREMENT\r\n70\r\n0\r\n/);
+  assert.match(cncReadme(d, inch, ['t.dxf', 'b.dxf']), /true size, in inches/);
+});
+
+test('a hole depth entered for the hardware names the layer; without one the layer says depth to suit', () => {
+  const d = defaultDesign();
+  assert.ok(make(d).v.files[0].layers.some((L) => L.name === 'TOP_BRIDGE_SCREW_3.18MM_HOLE_DEPTH_TO_SUIT'));
+  d.bridge.depths = { mount: 12, ferrule: 9.5 };
+  const { v } = make(d);
+  assert.ok(v.files[0].layers.some((L) => L.name === 'TOP_BRIDGE_SCREW_3.18MM_HOLE_12.00MM_DEEP' && L.depth === 12));
+  assert.ok(v.files[1].layers.some((L) => L.name === 'BACK_STRING_FERRULE_7.94MM_HOLE_9.50MM_DEEP'));
+  assert.ok(!v.files.some((f) => f.layers.some((L) => /DEPTH_TO_SUIT/.test(L.name))));
+});
+
+test('the binding channel\'s inner edge is the outline moved in by the channel width, on a layer with both sizes', () => {
+  const d = defaultDesign(); d.body.binding = { on: true, width: 2, depth: 7 };
+  const { g, v } = make(d);
+  const inner = on(v.files[0], /^TOP_BINDING_CHANNEL_INNER_EDGE_2\.00MM_WIDE_7\.00MM_DEEP$/);
+  assert.equal(inner.length, 1);
+  const b = box(inner[0]);
+  assert.ok(Math.abs(b.x0 - (g.bbox.x0 + 2)) < 0.02 && Math.abs(b.x1 - (g.bbox.x1 - 2)) < 0.02 && Math.abs(b.y0 - (g.bbox.y0 + 2)) < 0.02);
+  assert.equal(on(v.files[1], /BINDING/).length, 0, 'the channel is cut from the top only');
 });

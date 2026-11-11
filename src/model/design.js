@@ -2,6 +2,7 @@
 // Frame: x = 0 on the centerline (+x = treble side, as seen from the front with the neck up),
 // y = 0 on the scale line (exactly one scale length from the nut), +y toward the neck.
 import { NECK_PRESETS } from '../data/necks.js';
+import { BINDING_START } from '../data/parts.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
 import { SHOP } from '../data/shop.js';
@@ -110,8 +111,26 @@ export function unverifiedNeckKeys(design) {
   });
 }
 
+// `depths` holds the builder's own drilling depths, by hole group (see HOLE_DEPTH_GROUPS). Empty = not set.
 export function makeBridge(type) {
-  return { type, params: { ...(BRIDGES[type].params || {}) } };
+  return { type, params: { ...(BRIDGES[type].params || {}) }, depths: {} };
+}
+
+// The edge roundovers as they will really be cut: switched off, or too big for the body, comes out as 0.
+// A binding channel takes the top edge, so the top roundover is left out while one is on.
+export function edgeRounds(design) {
+  const b = design.body, T = b.thickness, lim = (r) => Math.max(0, Math.min(r || 0, T / 2 - 0.5));
+  return {
+    top: b.roundTopOn === false || (b.binding && b.binding.on) ? 0 : lim(b.roundTop),
+    back: b.roundBackOn === false ? 0 : lim(b.roundBack),
+  };
+}
+
+// The binding channel, or null when it is off: a ledge `width` in from the body edge, `depth` down from the top.
+export function bindingChannel(design) {
+  const c = design.body.binding, T = design.body.thickness;
+  if (!c || !c.on || !(c.width > 0.05) || !(c.depth > 0.05)) return null;
+  return { width: c.width, depth: Math.min(c.depth, T - 3) };
 }
 
 export function defaultDesign() {
@@ -121,7 +140,7 @@ export function defaultDesign() {
     name: 'Untitled guitar',
     units: 'in',
     outline: JSON.parse(JSON.stringify(STARTERS.doublecut.outline)),
-    body: { thickness, roundTop: IN / 8, roundBack: IN / 8, wood: 'alder', customDensity: 500 },
+    body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, wood: 'alder', customDensity: 500 },
     neck: applyNeckPreset({}, 'fender22'),
     strings: { count: 6, nutSpread: 1.375 * IN },
     compensation: { treble: 0.03 * IN, bass: 0.09 * IN },
@@ -152,11 +171,15 @@ export function normalizeDesign(raw) {
   if (!raw || typeof raw !== 'object') return d;
   const out = { ...d, ...raw, schema: SCHEMA };
   out.body = { ...d.body, ...(raw.body || {}) };
+  out.body.binding = { ...d.body.binding, ...((raw.body || {}).binding || {}) };
   out.neck = { ...d.neck, ...(raw.neck || {}) };
   out.strings = { ...d.strings, ...(raw.strings || {}) };
   out.compensation = { ...d.compensation, ...(raw.compensation || {}) };
   out.bridge = raw.bridge && BRIDGES[raw.bridge.type]
-    ? { type: raw.bridge.type, params: { ...(BRIDGES[raw.bridge.type].params || {}), ...(raw.bridge.params || {}) } }
+    ? {
+      type: raw.bridge.type, params: { ...(BRIDGES[raw.bridge.type].params || {}), ...(raw.bridge.params || {}) },
+      depths: Object.fromEntries(Object.entries(raw.bridge.depths || {}).filter(([, v]) => typeof v === 'number' && v > 0)),
+    }
     : d.bridge;
   out.pickups = (raw.pickups || d.pickups).filter((p) => PICKUPS[p.type]).map((p) => ({ ...makePickup(p.type), ...p }));
   out.controls = (raw.controls || d.controls).filter((c) => CONTROL_KINDS[c.kind]);
