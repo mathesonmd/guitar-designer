@@ -264,6 +264,24 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
               {topOn && bd.on && <p className="note">Left out while the binding channel is on: the channel takes the top edge.</p>}
               <Row label=""><Check checked={backOn} onChange={(v) => set('body', { roundBackOn: v })}>Round over the back edge</Check></Row>
               {backOn && <Row label="Back roundover radius" htmlFor="b-rb"><Len id="b-rb" units={u} value={design.body.roundBack} min={0} max={25} onChange={(v) => set('body', { roundBack: v })} /></Row>}
+              {(() => {
+                const eb = design.body.edgeBevel, made = g.bevelEdge;
+                const setE = (patch) => set('body', { edgeBevel: { ...eb, ...patch } });
+                const start = <Basis kind="assumed" text="A starting size only. This bevel is shaped by eye: set the depth and drag the inner line to what you want to carve." />;
+                const held = made ? made.handles.filter((h) => h.width < h.asked - 0.05).length : 0;
+                return (
+                  <>
+                    <Row label=""><Check checked={eb.on} onChange={(v) => setE({ on: v })}>Bevel around the top edge</Check></Row>
+                    {eb.on && <Row label="Depth at the body edge" htmlFor="eb-drop" basis={start}><Len id="eb-drop" units={u} value={eb.drop} min={0.5} max={design.body.thickness - 3} onChange={(v) => setE({ drop: v })} /></Row>}
+                    {eb.on && <Row label="Width" htmlFor="eb-width" basis={start}><Len id="eb-width" units={u} value={eb.width} min={0} max={150} onChange={(v) => setE({ width: v })} /></Row>}
+                    {eb.on && <Row label=""><button className="btn small" onClick={() => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map((n) => { const { bw, ...rest } = n; return rest; }) } }))}>Set every point to this width</button></Row>}
+                    {eb.on && <p className="note">A flat bevel from an inner line on the top down to the body edge. The inner line starts as the outline moved in by the width above. Shape it by dragging the brass diamonds on the drawing: each one sets how wide the bevel is at that point of the outline. Add a point to the outline to get another diamond.</p>}
+                    {eb.on && held > 0 && <p className="note">At {held} {held === 1 ? 'point' : 'points'} the bevel is held narrower than asked, because the body has no room for more there (a horn tip, a corner or a tight curve).</p>}
+                    {eb.on && made && made.crosses && <p className="note" style={{ color: 'var(--torch)' }}>The inner line crosses itself. Make the bevel narrower where the outline turns tightly; it cannot be cut as drawn.</p>}
+                    {eb.on && <p className="note">While this bevel is on, the top roundover and the binding channel are left out: the bevel takes the top edge. It is in the 3D view, the 3D model and the CNC vectors. It is not on the routing templates.</p>}
+                  </>
+                );
+              })()}
               <Row label=""><Check checked={bd.on} onChange={(v) => setB({ on: v })}>Binding channel around the top edge</Check></Row>
               {bd.on && <Row label="Channel width" htmlFor="bind-w" basis={size}><Len id="bind-w" units={u} value={bd.width} min={0.5} max={10} onChange={(v) => setB({ width: v })} /></Row>}
               {bd.on && <Row label="Channel depth" htmlFor="bind-d" basis={size}><Len id="bind-d" units={u} value={bd.depth} min={0.5} max={design.body.thickness - 3} onChange={(v) => setB({ depth: v })} /></Row>}

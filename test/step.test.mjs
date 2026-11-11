@@ -5,7 +5,8 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import * as rc from 'replicad';
 import start from 'replicad-opencascadejs';
-import { defaultDesign, normalizeDesign, edgeRounds, STARTERS, makeBridge } from '../src/model/design.js';
+import { defaultDesign, normalizeDesign, edgeRounds, bindingChannel, STARTERS, makeBridge } from '../src/model/design.js';
+import { segmentsOf } from '../src/core/path.js';
 import { derive } from '../src/model/derive.js';
 import { buildLayers, bevelPlane, bevelProfile, bellyDish, bellyParams } from '../src/model/solid.js';
 import { buildBodySolid, holesLeftOut, toSTEP, toSTL } from '../src/export/step.js';
@@ -285,4 +286,77 @@ test('the belly cut is a cone: straight slope from its center to its rim, length
   assert.equal(cone.depth(rimX + 0.5, b.y), 0);
   assert.ok(soft.depth(rimX + 0.5, b.y) > 0 && soft.depth(rimX + 30, b.y) === 0);
   assert.ok(Math.abs(soft.depth(rimX - 30, b.y) - cone.depth(rimX - 30, b.y)) < 1e-9, 'unchanged away from the rim');
+});
+
+// ---- the bevel around the top edge, shaped from an inner line ----
+test('edge bevel: on every starting shape the inner line is clean and the CAD solid matches the sliced solid', () => {
+  for (const key of Object.keys(STARTERS)) for (const width of [15, 30]) {
+    const d = bare(); d.outline = JSON.parse(JSON.stringify(STARTERS[key].outline));
+    const before = build(d);
+    d.body.edgeBevel = { on: true, width, drop: 6 };
+    const r = build(d), e = r.g.bevelEdge, name = `${key} at ${width} mm`;
+    assert.equal(e.crosses, false, `${name}: the inner line does not cross itself`);
+    const so = segmentsOf(e.outer, true), si = segmentsOf(e.inner, true);
+    so.forEach((a, i) => assert.ok((a.p3.x - a.p0.x) * (si[i].p3.x - si[i].p0.x) + (a.p3.y - a.p0.y) * (si[i].p3.y - si[i].p0.y) > 0, `${name}: the inner line runs the same way as the outline at segment ${i}`));
+    assert.equal(r.cad.valid, true, name);
+    assert.ok(pct(r.cad.volume, r.slices.volume) < 0.01, `${name}: volume differs by ${pct(r.cad.volume, r.slices.volume).toFixed(4)}%`);
+    assert.ok(before.cad.volume - r.cad.volume > 30000, `${name}: the bevel takes a real amount of wood`);
+  }
+});
+
+test('edge bevel: flat from the inner line down to its depth at the body edge', () => {
+  const d = bare(); d.outline = JSON.parse(JSON.stringify(STARTERS.blank.outline)); d.body.edgeBevel = { on: true, width: 20, drop: 8 };
+  const g = derive(d, { tol: 0.005 }), e = g.bevelEdge, T = d.body.thickness;
+  // bottom of the body (the outline's lowest point, on the centerline): the inner line sits 20 mm in
+  const low = e.handles.find((h) => Math.abs(h.outer.x) < 1e-6 && h.outer.y < 0);
+  assert.ok(Math.abs(low.width - 20) < 1e-9 && Math.abs(low.inner.y - (low.outer.y + 20)) < 1e-6 && Math.abs(low.inner.x) < 1e-6);
+  // halfway up the bevel the body's edge is halfway between the outline and the inner line
+  const half = e.at(0.5), lowest = Math.min(...half.map((p) => p.y));
+  assert.ok(Math.abs(lowest - (low.outer.y + 10)) < 0.05, 'a straight slope');
+  const full = e.at(0), top = e.at(1);
+  assert.ok(Math.abs(Math.min(...full.map((p) => p.y)) - low.outer.y) < 0.05 && Math.abs(Math.min(...top.map((p) => p.y)) - low.inner.y) < 0.05);
+  // the slices carry it between T - drop and T
+  const s = buildLayers(d, g), band = s.layers.filter((L) => L.tag.edge);
+  assert.ok(band.length >= 12 && Math.abs(band[0].z0 - (T - 8)) < 1e-6 && Math.abs(band[band.length - 1].z1 - T) < 1e-6);
+  assert.ok(band.every((L, i) => i === 0 || L.area < band[i - 1].area), 'the body narrows steadily toward the top');
+});
+
+test('edge bevel: each outline point has its own width, mirrored outlines mirror it, and tight places are held narrower', () => {
+  const d = bare(); d.outline = JSON.parse(JSON.stringify(STARTERS.blank.outline)); d.body.edgeBevel = { on: true, width: 12, drop: 6 };
+  d.outline.nodes[1].bw = 40; // the upper bout point on the bass side (stored half)
+  const e = derive(d, { tol: 0.005 }).bevelEdge;
+  const wide = e.handles.filter((h) => Math.abs(h.asked - 40) < 1e-9);
+  assert.equal(wide.length, 2, 'the mirrored half gets the same width');
+  assert.ok(Math.abs(wide[0].outer.x + wide[1].outer.x) < 1e-6 && Math.abs(wide[0].inner.x + wide[1].inner.x) < 1e-6);
+  assert.ok(e.handles.filter((h) => Math.abs(h.asked - 12) < 1e-9).length === e.handles.length - 2);
+  // a horn tip cannot take a wide bevel: the width there is held to the room the horn has
+  const h = bare(); h.body.edgeBevel = { on: true, width: 30, drop: 6 };
+  const eh = derive(h, { tol: 0.005 }).bevelEdge;
+  assert.ok(eh.widths.some((w, i) => w < eh.asked[i] - 5), 'held narrower somewhere');
+  assert.ok(Math.max(...eh.widths) > 29, 'and full width where there is room');
+});
+
+test('edge bevel takes the top edge: no top roundover and no binding channel while it is on', () => {
+  const d = defaultDesign(); d.body.binding.on = true;
+  assert.ok(bindingChannel(d));
+  d.body.edgeBevel.on = true;
+  assert.equal(bindingChannel(d), null);
+  assert.deepEqual(edgeRounds(d), { top: 0, back: 3.175 });
+  assert.equal(derive(d).binding, null);
+  assert.equal(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline }).body.edgeBevel.on, false, 'older files open with the bevel off');
+});
+
+test('edge bevel: the inner line is the same whether the outline is worked out finely or coarsely', () => {
+  // the 3D view derives the body with a coarser outline than the saved files do
+  for (const key of Object.keys(STARTERS)) {
+    const d = bare(); d.outline = JSON.parse(JSON.stringify(STARTERS[key].outline)); d.body.edgeBevel = { on: true, width: 15, drop: 6 };
+    const fine = derive(d, { tol: 0.005 }).bevelEdge;
+    for (const tol of [0.02, 0.03, 0.1]) { // the tolerances the page uses for the drawing, the checks and the 3D view
+      const coarse = derive(d, { tol }).bevelEdge;
+      assert.equal(coarse.widths.length, fine.widths.length);
+      const worst = Math.max(...coarse.widths.map((w, i) => Math.abs(w - fine.widths[i])));
+      assert.ok(worst < 1.5, `${key} at outline tolerance ${tol}: widths differ by up to ${worst.toFixed(2)} mm`);
+      assert.ok(Math.min(...coarse.widths) > 1 || Math.min(...fine.widths) <= 1, `${key}: no point pinched to nothing by a coarse outline`);
+    }
+  }
 });

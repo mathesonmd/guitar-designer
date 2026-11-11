@@ -9,6 +9,7 @@ import { edgeRounds } from './design.js';
 const ROUND_STEPS = 8;
 const BEVEL_STEP = 1.0;
 const DISH_STEP = 0.75;
+const EDGE_STEPS = 16;
 
 // ---------------------------------------------------------------------------------------------
 // Arm bevel. A cut that starts at a line drawn on the top and deepens toward the body edge. It is the
@@ -236,6 +237,7 @@ export function buildLayers(design, g) {
   const T = design.body.thickness;
   const { top: rT, back: rB } = edgeRounds(design);
   const bind = g.binding || null;
+  const edge = g.bevelEdge || null;
   const base = toRegion([g.outline]);
   const arm = bevelPlane(design.contours.arm, g.outline, g.centroid, T - 3);
   const dish = bellyDish(design.contours.belly, T - 3);
@@ -259,6 +261,7 @@ export function buildLayers(design, g) {
   const add = (z) => { if (z > 1e-6 && z < T - 1e-6) zs.add(Math.round(z * 1e4) / 1e4); };
   for (const r of removed) { add(r.z0); add(r.z1); }
   if (bind) add(T - bind.depth);
+  if (edge) for (let i = 0; i <= EDGE_STEPS; i++) add(T - edge.drop + (edge.drop * i) / EDGE_STEPS);
   const topBand = [], backBand = [];
   if (rT > 0.05) for (let i = 0; i <= ROUND_STEPS; i++) { const th = (i / ROUND_STEPS) * (Math.PI / 2); const z = T - rT + rT * Math.sin(th); topBand.push({ z, th }); add(z); }
   if (rB > 0.05) for (let i = 0; i <= ROUND_STEPS; i++) { const th = (i / ROUND_STEPS) * (Math.PI / 2); const z = rB - rB * Math.sin(th); backBand.push({ z, th }); add(z); }
@@ -292,6 +295,12 @@ export function buildLayers(design, g) {
     // the binding channel is a square ledge: above its floor the body is narrower by the channel's width
     if (bind && zm > T - bind.depth) inset = Math.max(inset, bind.width);
     let region = insetRegion(inset);
+    // bevel around the top edge: at this height the body is the shape partway from the outline to the inner line
+    if (edge && zm > T - edge.drop) {
+      const k = (zm - (T - edge.drop)) / edge.drop;
+      region = toRegion([edge.at(k)]);
+      tag.edge = { k, drop: edge.drop };
+    }
     if (arm && zm > T - arm.drop) {
       const cutAway = arm.region(T - zm);
       if (cutAway.length) region = difference(region, cutAway);

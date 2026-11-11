@@ -1,11 +1,13 @@
 // Turns a design document into geometry: outline polygon, neck pocket, frets, strings, every cavity
 // and every hole, all in body coordinates (mm).
-import { outlinePolygon } from '../core/path.js';
-import { bbox, filletPoly, place, roundRect, signedArea, centroid } from '../core/poly.js';
-import { offset, largestOuter } from '../core/clip.js';
+import { outlinePolygon, expandOutline, insetNodes, inwardNormals, insertNode, segmentsOf } from '../core/path.js';
+import { EdgeIndex } from '../core/edgeindex.js';
+import { cubicAt } from '../core/bezier.js';
+import { bbox, filletPoly, place, roundRect, signedArea, centroid, pointInPoly } from '../core/poly.js';
+import { offset, largestOuter, toRegion } from '../core/clip.js';
 import { fretDistance, fretAt } from '../core/fret.js';
 import { BRIDGES, holeDepthGroup } from '../data/bridges.js';
-import { bindingChannel } from './design.js';
+import { bindingChannel, edgeBevel } from './design.js';
 import { PICKUPS } from '../data/pickups.js';
 import { CONTROL_KINDS } from '../data/parts.js';
 
@@ -129,12 +131,77 @@ export function derive(design, { tol = 0.02 } = {}) {
   const bind = bindingChannel(design);
   const binding = bind ? { ...bind, inner: offset([outline], -bind.width, tol / 2).map((e) => e.outer) } : null;
 
+  // bevel around the top edge: the outline and its inner line, node for node, and the shape of the body
+  // at any height through the bevel (k = 0 at the body edge and the bevel's full depth, 1 at the inner
+  // line and the top). Straight lines join matching points of the two curves.
+  const eb = edgeBevel(design);
+  let bevelEdge = null;
+  if (eb) {
+    // The outline with extra points added along each long segment (the curve itself is unchanged), so the
+    // inner line follows it closely. `from` remembers which of the outline's own points each one is.
+    const own = expandOutline(design.outline);
+    const ownWidth = own.map((p) => Math.max(0, p.bw !== undefined ? p.bw : eb.width));
+    let outer = own.map((p, i) => ({ ...p, from: i, want: ownWidth[i] }));
+    for (let i = own.length - 1; i >= 0; i--) {
+      const a = own[i], b = own[(i + 1) % own.length], K = Math.max(1, Math.min(6, Math.ceil(Math.hypot(b.x - a.x, b.y - a.y) / 22)));
+      for (let j = 1; j < K; j++) {
+        // each cut takes the first 1/(K-j+1) of what is left of the segment, which starts at index i + j - 1
+        const r = insertNode(outer, i + j - 1, 1 / (K - j + 1), true);
+        outer = r.nodes;
+        outer[r.index] = { ...outer[r.index], from: -1, want: ownWidth[i] + ((ownWidth[(i + 1) % own.length] - ownWidth[i]) * j) / K };
+      }
+    }
+    const normals = inwardNormals(outer), edges = new EdgeIndex(outline, 12);
+    // A point's width is what was asked for, but never more than the body has room for there: the inner
+    // point must stay well clear of every other part of the outline, so the inner line cannot cross over
+    // at a horn, a waist or a corner.
+    const room = outer.map((p, i) => {
+      // a circle of radius r lying inside the body and touching the outline at this point (at a corner, touching its two sides)
+      // (`slack` allows for the outline here being a many-sided polygon, not the true curve)
+      const n = normals[i], slack = Math.max(0.3, 4 * tol);
+      const clear = (r) => edges.nearest(p.x + n.x * r, p.y + n.y * r).d >= 0.97 * n.open * r - slack && pointInPoly({ x: p.x + n.x * r, y: p.y + n.y * r }, outline);
+      if (!clear(1)) return 0;
+      let lo = 1, hi = 1;
+      while (hi < 400 && clear(hi * 2)) hi *= 2;
+      hi *= 2;
+      for (let k = 0; k < 24; k++) { const mid = (lo + hi) / 2; if (clear(mid)) lo = mid; else hi = mid; }
+      return lo;
+    });
+    const asked = outer.map((p) => p.want);
+    const widths = asked.map((w, i) => Math.min(w, 0.8 * room[i]));
+    // If a stretch of the inner line still runs backward (a curve tighter than the bevel is wide), pull the
+    // points at its ends in until it runs forward again.
+    for (let pass = 0; pass < 14; pass++) {
+      const trial = insetNodes(outer, widths), m = outer.length;
+      let fixed = false;
+      for (let i = 0; i < m; i++) {
+        const j = (i + 1) % m, ox = outer[j].x - outer[i].x, oy = outer[j].y - outer[i].y, ix = trial[j].x - trial[i].x, iy = trial[j].y - trial[i].y;
+        if (ox * ix + oy * iy < 0.15 * (ox * ox + oy * oy)) { widths[i] *= 0.8; widths[j] *= 0.8; fixed = true; }
+      }
+      if (!fixed) break;
+    }
+    const inner = insetNodes(outer, widths);
+    const so = segmentsOf(outer, true), si = segmentsOf(inner, true);
+    const pairs = [];
+    so.forEach((a, i) => {
+      const b = si[i], len = Math.hypot(a.p3.x - a.p0.x, a.p3.y - a.p0.y), N = Math.max(6, Math.min(60, Math.ceil(len / 2.5)));
+      for (let j = 0; j < N; j++) pairs.push([cubicAt(a.p0, a.p1, a.p2, a.p3, j / N), cubicAt(b.p0, b.p1, b.p2, b.p3, j / N)]);
+    });
+    const at = (k) => pairs.map(([o, q]) => ({ x: o.x + (q.x - o.x) * k, y: o.y + (q.y - o.y) * k }));
+    const innerPoly = at(1);
+    // an inner line that still crosses itself (between points, on a tight curve) cannot be cut
+    const crosses = Math.abs(toRegion([innerPoly]).reduce((s, e) => s + Math.abs(signedArea(e.outer)) - e.holes.reduce((h, q) => h + Math.abs(signedArea(q)), 0), 0) - Math.abs(signedArea(innerPoly))) > 2;
+    // where the outline's own points sit on the inner line, for the drag squares: [{ i, outer, inner, normal, width, asked }]
+    const handles = outer.map((p, j) => ({ i: p.from, outer: { x: p.x, y: p.y }, inner: { x: inner[j].x, y: inner[j].y }, normal: normals[j], width: widths[j], asked: asked[j] })).filter((h) => h.i >= 0);
+    bevelEdge = { ...eb, outer, inner, normals, widths, asked, at, innerPoly, crosses, handles };
+  }
+
   const area = Math.abs(signedArea(outline));
   return {
     outline, bbox: ob, area, centroid: centroid(outline),
     scale, nutY, heelY, boardEndY, neckHalf, pocketHalf,
     pocket, pocketTo, mouthY, fretboard, frets, strings, stringXAt, saddleSpread,
-    bridge, bridgeDef: bdef, pickups, cavities, cuts, holes, binding,
+    bridge, bridgeDef: bdef, pickups, cavities, cuts, holes, binding, bevelEdge,
     join: { treble: joinFret(1), bass: joinFret(-1) },
     heelToScale: heelY,
   };

@@ -36,6 +36,9 @@ export const CONTROL_NOTE = 'Hole sizes are starting values (3/8 in for pots and
 // channel has to be set to the strip in hand: its thickness is the channel's width, its height the depth.
 export const BINDING_START = { width: 1.5, depth: 6 };
 
+// Bevel around the top edge: a starting width and depth only (basis: assumed). It is shaped by eye.
+export const EDGE_BEVEL_START = { width: 15, drop: 6 };
+
 // Belly cut: the radius of the short smooth transition at its rim. A starting size only (basis: assumed).
 export const BELLY_BLEND_START = 25;
 

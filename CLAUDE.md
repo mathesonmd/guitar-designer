@@ -25,9 +25,9 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 57 geometry and export tests (19 of them build the CAD solid)
+    npm test                  # 63 geometry and export tests (24 of them build the CAD solid)
     npm run build
-    node test/interact.mjs    # 32 click-through steps in headless Chromium
+    node test/interact.mjs    # 33 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
 
 All must pass. Add a test for every new behavior and for every bug fixed. The two browser scripts need
@@ -69,6 +69,10 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   when the body is rolled against it, so it is curved in one direction only and straight in the other;
   the belly cut is a wide, short cone removed like a boolean cut, with a short smooth transition.
   Do not make the arm bevel doubly curved by default.
+- The bevel around the top edge (`g.bevelEdge` in `derive.js`) pairs the outline with an inner line node
+  for node; both solids join matching points with straight lines, so they agree to about 0.001%. The 3D
+  view derives the body with a coarser outline (tol 0.1) than the files do: anything that measures
+  against the outline polygon must allow for that, or the picture and the file will differ.
 - Contours live in `solid.js` as depth functions (`bevelPlane`, `bevelProfile`, `bellyDish`); `step.js`
   builds its cutters from the same profile pieces, so change the math in `solid.js` first. The belly rim
   blend is the one place the two differ on purpose: true rolled radius in CAD, close approximation in the
@@ -97,7 +101,8 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 and custom necks; six pickup cavities plus a custom rectangle; three bridges; controls and back cavity;
 arm bevel (rolled like a flat-sander cut: straight along its line, curved across it; optionally flatter,
 blended, or kept between its squares with a run-out) and belly cut (a wide, short cone sized by center,
-length, reach and depth, with a short rim blend); live build checks; 3D view; templates with bearing or bushing
+length, reach and depth, with a short rim blend); a bevel around the top edge shaped from an inner line
+(a width at each outline point); live build checks; 3D view; templates with bearing or bushing
 offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; 2D CNC vectors for
 pockets and holes, in millimeters or inches; a 3D model of the body as STEP (true solid) or STL (fine
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
@@ -120,8 +125,10 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- Whether the rolled arm bevel and the cone-shaped belly cut now look right in Aspire, and whether the
-  belly cut's three drag squares feel right.
+- Whether the bevel around the top edge is the "organic bevel" he meant: one flat facet from a shaped
+  inner line to the edge. Open choices: a rolled or blended profile, a depth that varies along the edge,
+  and keeping a binding or purfling line with it.
+- He would adjust the arm bevel and belly cut further but says they will work.
 - Whether centering now lines the vectors up exactly with the model in Aspire, and whether inch files
   import at the right size.
 

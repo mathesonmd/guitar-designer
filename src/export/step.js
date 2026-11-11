@@ -37,10 +37,14 @@ function drawVerts(rc, verts) {
 }
 
 // The body outline with its own Bezier segments (a segment with no handles is a straight line).
-function drawOutline(rc, outline) {
-  let nodes = expandOutline(outline);
-  const flat = nodes.map((p) => ({ x: p.x, y: p.y }));
-  if (signedArea(flat) < 0) {
+function drawOutline(rc, outline) { return drawNodes(rc, expandOutline(outline)); }
+
+// A closed drawing from a chain of Bezier nodes. `flip` says whether to run it backward; left out, the
+// chain is turned counter-clockwise. (Two chains that must pair up point for point are flipped together.)
+function drawNodes(rc, chain, flip) {
+  let nodes = chain;
+  const back = flip !== undefined ? flip : signedArea(nodes.map((p) => ({ x: p.x, y: p.y }))) < 0;
+  if (back) {
     nodes = nodes.slice().reverse().map((p) => ({ ...p, ix: p.ox, iy: p.oy, ox: p.ix, oy: p.iy }));
   }
   const segs = segmentsOf(nodes, true).filter((s) => Math.hypot(s.p3.x - s.p0.x, s.p3.y - s.p0.y) > EPS
@@ -190,6 +194,21 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
   if (arm) tools.push(bevelTool(rc, oc, arm, design.contours.arm, T));
   const dish = bellyDish(design.contours.belly, T - 3);
   if (dish) tools.push(bellyCone(rc, oc, dish));
+
+  // bevel around the top edge: everything outside the ruled surface that runs from the outline, at the
+  // bevel's depth, up to the inner line at the top (and on straight up above the top)
+  if (g.bevelEdge) {
+    const e = g.bevelEdge, b = g.bbox, m = 20, z0 = T - e.drop;
+    if (e.crosses) throw new Error('The inner line of the bevel around the top edge crosses itself. Make the bevel narrower where the outline turns tightly, then try again.');
+    const back = signedArea(e.outer.map((p) => ({ x: p.x, y: p.y }))) < 0;
+    let keep;
+    try {
+      keep = drawNodes(rc, e.outer, back).sketchOnPlane('XY', z0).loftWith([drawNodes(rc, e.inner, back).sketchOnPlane('XY', T), drawNodes(rc, e.inner, back).sketchOnPlane('XY', T + 2 * PAST)], { ruled: true });
+    } catch (err) {
+      throw new Error('The bevel around the top edge could not be built. Its inner line probably crosses itself: make the bevel narrower where the outline turns tightly, then try again.');
+    }
+    tools.push(prism(rc.drawRoundedRectangle(b.w + 2 * m, b.h + 2 * m).translate(b.x0 + b.w / 2, b.y0 + b.h / 2), z0, T + PAST).cut(keep));
+  }
 
   // binding channel: everything outside its inner edge, from the channel floor up
   if (g.binding && g.binding.inner.length) {

@@ -1,5 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { expandOutline, nodesToSvgPath, nearestOnNodes, insertNode, removeNode, setHandle, setKind } from '../core/path.js';
+import { expandOutline, nodesToSvgPath, nearestOnNodes, insertNode, removeNode, setHandle, setKind, storedIndex } from '../core/path.js';
 import { fmtLen, unitLabel } from '../core/units.js';
 import { useSize } from './widgets.jsx';
 import { bellyDish, bevelPlane } from '../model/solid.js';
@@ -81,6 +81,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     else if (k === 'cavity') { const c = design.cavities.find((q) => q.id === id); setSel({ kind: 'cavity', id }); drag.current = { kind: 'cavity', id, w0: w, p0: { ...c } }; }
     else if (k === 'bevel') { setSel({ kind: 'bevel', id }); drag.current = { kind: 'bevel', id, i: id === 'belly' ? t.dataset.i : i }; }
     else if (k === 'reg') { drag.current = { kind: 'reg', i }; }
+    else if (k === 'edgebevel') { const h = g.bevelEdge && g.bevelEdge.handles.find((q) => q.i === i); if (h) drag.current = { kind: 'edgebevel', i, at: h.outer, n: h.normal }; }
   };
 
   const onMove = (e) => {
@@ -132,6 +133,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       edit((ds) => ({ ...ds, controls: ds.controls.map((c) => (c.id === d.id ? { ...c, x: d.p0.x + (w.x - d.w0.x), y: d.p0.y + (w.y - d.w0.y) } : c)) }), T);
     } else if (d.kind === 'cavity') {
       edit((ds) => ({ ...ds, cavities: ds.cavities.map((c) => (c.id === d.id ? { ...c, x: d.p0.x + (w.x - d.w0.x), y: d.p0.y + (w.y - d.w0.y) } : c)) }), T);
+    } else if (d.kind === 'edgebevel') {
+      // a square on the edge bevel's inner line: how far in from its outline point it sits is that point's width
+      const width = Math.max(0, (w.x - d.at.x) * d.n.x + (w.y - d.at.y) * d.n.y);
+      edit((ds) => {
+        const ns = ds.outline.nodes.slice(), j = storedIndex(ds.outline, d.i);
+        ns[j] = { ...ns[j], bw: Math.round(width * 100) / 100 };
+        return { ...ds, outline: { ...ds.outline, nodes: ns } };
+      }, T);
     } else if (d.kind === 'bevel' && d.id === 'belly') {
       // the bowl: its middle moves it, the end square sets its length and turns it, the side square sets its reach
       edit((ds) => {
@@ -280,6 +289,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
           {bellyEdge && <path d={polyD(bellyEdge)} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="2 5" {...NS} clipPath="url(#bodyclip)" />}
           {bellyEdge && bellyHandles && <path d={`M${bellyHandles.l.x} ${bellyHandles.l.y}L${bellyHandles.c.x} ${bellyHandles.c.y}L${bellyHandles.w.x} ${bellyHandles.w.y}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
 
+          {g.bevelEdge && <path d={polyD(g.bevelEdge.innerPoly)} data-k="edgeline" stroke="var(--brass)" strokeWidth="1.3" fill="none" {...NS} style={{ pointerEvents: 'none' }} />}
           {g.binding && g.binding.inner.map((p, i) => <path key={'bind' + i} d={polyD(p)} data-k="binding" stroke="var(--brass)" strokeWidth="1" strokeDasharray="5 3" fill="none" {...NS} />)}
           {show.cavities && <path d={polyD(g.pocket)} stroke="var(--bone-dim)" strokeWidth="1.2" fill="rgba(20,18,16,.55)" {...NS} clipPath="url(#bodyclip)" />}
           {show.cavities && g.cuts.filter((c) => c.side === 'top' && c.kind !== 'pocket').map((c) => (
@@ -334,6 +344,13 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
             return <g key={i}><circle cx={p.x} cy={p.y} r="9" fill="none" stroke="var(--torch)" strokeWidth="1.6" /><circle cx={p.x} cy={p.y} r="2.2" fill="var(--torch)" /></g>;
           })}
         </g>
+
+        {g.bevelEdge && g.bevelEdge.handles.map((h) => {
+          const p = S(h.inner);
+          return <g key={'eb' + h.i} data-k="edgebevel" data-i={h.i} style={{ cursor: 'move' }}>
+            <circle cx={p.x} cy={p.y} r="11" fill="transparent" /><rect x={p.x - 4} y={p.y - 4} width="8" height="8" transform={`rotate(45 ${p.x} ${p.y})`} fill="var(--forge)" stroke="var(--brass)" strokeWidth="1.6" />
+          </g>;
+        })}
 
         {['arm', 'belly'].map((key) => {
           const c = design.contours[key];

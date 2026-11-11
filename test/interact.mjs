@@ -602,6 +602,45 @@ await step('the belly cut is sized with three squares, and the arm bevel can be 
   return `length ${b0.len.toFixed(0)} → ${b1.len.toFixed(0)} mm, reach ${b1.reach.toFixed(0)} → ${b2.reach.toFixed(0)} mm, turned ${(b4.angle * 180 / Math.PI).toFixed(0)}° then undone; smooth STEP ${(fs.statSync(smooth).size / 1024).toFixed(0)} KB`;
 });
 
+await step('a bevel around the top edge is shaped by dragging a diamond at each outline point', async () => {
+  await tab('Design'); await settle(400); await openSec('body');
+  const n0 = (await state()).outline;
+  await page.locator('section[data-sec="body"] label.check:has-text("Bevel around the top edge") input').check();
+  await setField('#eb-width', '15 mm'); await setField('#eb-drop', '6 mm');
+  await settle(600);
+  const count = await page.locator('.stage [data-k="edgebevel"]').count();
+  assert(count === (n0.symmetric ? 2 * (n0.nodes.length - 1) : n0.nodes.length), `one diamond for each point of the outline (${count})`);
+  assert(await page.locator('.stage [data-k="edgeline"]').count() === 1, 'the inner line is drawn');
+  assert(/top roundover and the binding channel are left out/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says what the bevel replaces');
+  // drag the diamond of the lowest outline point 20 mm farther into the body
+  const nodes = n0.nodes, low = nodes.reduce((b, q, k) => (q.y < nodes[b].y ? k : b), 0);
+  const bb = await page.locator(`.stage [data-k="edgebevel"][data-i="${low}"]`).boundingBox();
+  const v = await view(), px = bb.x + bb.width / 2, py = bb.y + bb.height / 2;
+  await page.mouse.move(px, py); await page.mouse.down();
+  for (let k = 1; k <= 6; k++) await page.mouse.move(px, py - (20 * v.s * k) / 6);
+  await page.mouse.up();
+  const s1 = await state();
+  near(s1.outline.nodes[low].bw, 35, 1.5, 'that point is now 15 + 20 mm wide');
+  assert(s1.outline.nodes.filter((q) => q.bw !== undefined).length === 1, 'only that point was changed');
+  await tab('3D'); await settle(1500);
+  await page.locator('.viewopts label.check input').uncheck(); await settle(500);
+  await page.screenshot({ path: path.join(out, '3d-edge-bevel.png') });
+  await page.locator('.viewopts label.check input').check();
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  assert(/bevel around the top edge, 6 mm/i.test(await dlg.innerText()), 'the dialog lists the edge bevel');
+  files.stepEdge = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const edge = files.stepEdge.replace('.step', '-smooth-edge.step'); fs.renameSync(files.stepEdge, edge); files.stepEdge = edge;
+  assert(fs.readFileSync(edge, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file with the edge bevel saved');
+  await page.keyboard.press('Escape');
+  await tab('Design'); await openSec('body');
+  await page.locator('section[data-sec="body"] button:has-text("Set every point to this width")').click();
+  const s2 = await state();
+  assert(s2.outline.nodes.every((q) => q.bw === undefined), 'every point is back to the general width');
+  await page.locator('section[data-sec="body"] label.check:has-text("Bevel around the top edge") input').uncheck();
+  return `${count} diamonds; one dragged to ${s1.outline.nodes[low].bw.toFixed(1)} mm; STEP ${(fs.statSync(edge).size / 1024).toFixed(0)} KB`;
+});
+
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {
   await tab('Templates'); await settle(800);
   const vb = () => page.locator('.sheetwrap svg').evaluate((el) => el.getAttribute('viewBox').split(' ').map(Number));

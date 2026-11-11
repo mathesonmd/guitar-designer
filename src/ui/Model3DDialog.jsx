@@ -109,6 +109,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
         {hasRound && (roll
           ? <li>Edge roundovers rolled around the outline{rT > 0.05 ? `, top ${both(rT)}` : ''}{rB > 0.05 ? `, back ${both(rB)}` : ''}.</li>
           : <li>Square edges. The roundovers are left for you to rout by hand.</li>)}
+        {g.bevelEdge && <li>The bevel around the top edge, {both(g.bevelEdge.drop)} deep at the body edge, flat from the inner line you shaped.</li>}
         {g.binding && <li>The binding channel around the top edge, {both(g.binding.width)} wide and {both(g.binding.depth)} deep.</li>}
         {arm && <li>The arm bevel, {arm.roll >= 0.99 ? 'rolled so it leaves the top with no crease' : arm.crown > 0 ? 'as a curved cut' : 'as a flat cut'}{arm.blend > 0 ? ', with its crease rounded' : ''}{arm.bounded ? (arm.fade > 0 ? ', running out to nothing at each end of its line' : ', stopping square at each end of its line') : ', straight along its line right across the body'}.</li>}
         {belly && <li>The belly cut, as a shallow cone{belly.blend > 0 ? ' with a rounded rim' : ' with a sharp rim'}.</li>}
