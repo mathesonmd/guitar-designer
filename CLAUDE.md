@@ -163,3 +163,6 @@ touch gestures, Safari and Firefox are untried.
   when a 3D model is saved; `build.mjs` reads the versions from `package.json`, and `test/browser.mjs`
   serves the same files from `node_modules`. Change the two packages together: they are a matched pair.
 - Rebuild before committing so `dist/` matches `src/`.
+- The owner's demo copy is the claude.ai artifact at https://claude.ai/artifact/5xPFL1MRmtKgMuWZZbzxC3
+  (private to him). To refresh it, publish `dist/artifact.html` to that same link with the `downloads`
+  capability, not as a new artifact.
