@@ -1,8 +1,8 @@
 // The body as a true CAD solid, for saving as a STEP file (exact) or an STL file (a fine mesh of it). Unlike the sliced solid behind the 3D picture
 // (model/solid.js), every surface here is exact: the outline keeps its Bezier curves, the edge roundovers
 // are rolled fillets, pockets have vertical walls with true arcs in the corners and flat floors, and
-// round holes are true cylinders. The arm bevel is a flat plane and the belly cut is the same dish
-// formula the 3D picture uses.
+// round holes are true cylinders. The arm bevel's cross-section and run-out are the same curves the
+// sliced solid uses, drawn exactly; the belly cut is the same bowl formula, with a true rolled rim blend.
 //
 // `rc` is the replicad module (an OpenCascade wrapper) with its engine already set. It is passed in so
 // the same code runs in the browser, where the engine is fetched on demand, and in the Node tests.
@@ -57,43 +57,79 @@ function drawOutline(rc, outline) {
 // A drawing pushed straight up from height z0 to height z1.
 const prism = (drawing, z0, z1) => drawing.sketchOnPlane('XY', z0).extrude(z1 - z0);
 
-// The wedge an arm bevel removes: a flat plane that starts at the line drawn on the top and drops
-// toward the body edge, between the line's two ends.
-function bevelWedge(rc, arm, c, T) {
-  const reach = arm.sMax + 30; // well past the farthest body edge
-  const tx = -arm.ny, ty = arm.nx; // either direction along the line; the span is found below
-  const l = Math.hypot(c.x2 - c.x1, c.y2 - c.y1);
-  const dir = ((c.x2 - c.x1) * tx + (c.y2 - c.y1) * ty) >= 0 ? 1 : -1;
-  const at = (s, z) => [c.x1 + arm.nx * s, c.y1 + arm.ny * s, z];
-  const face = rc.makePolygon([at(0, T), at(reach, T - arm.slope * reach), at(reach, T + PAST), at(0, T + PAST)]);
-  return rc.basicFaceExtrusion(face, new rc.Vector([tx * dir * l, ty * dir * l, 0]));
-}
-
-// The shape a belly cut removes: depth = drop * (1 - u^2 - v^2), u toward the inside of the body and
-// v along its edge. That surface is one parabola slid along another without turning, so it is built
-// exactly that way: a parabola-topped profile (across u) carried along a parabola (across v).
-function bellyBowl(rc, oc, dish, c) {
-  const R = 1.2; // the tool reaches past the rim of the cut, where its surface is already below the back
-  const D = dish.drop;
-  const dx = c.x2 - c.x1, dy = c.y2 - c.y1, a = Math.hypot(dx, dy), b = c.len / 2;
-  const ux = (dx / a) * a, uy = (dy / a) * a, vx = (-dy / a) * b, vy = (dx / a) * b;
-  const at = (u, v, z) => [c.x1 + ux * u + vx * v, c.y1 + uy * u + vy * v, z];
-  // z = D * (1 - u^2 - v^2). Along u at v = -R, and along v at u = 0, each is exactly a quadratic Bezier.
-  const rim = D * (1 - 2 * R * R), floor = -3 * D - PAST;
-  const top = rc.makeBezierCurve([at(-R, -R, rim), at(0, -R, D * (1 - R * R) + D * R * R), at(R, -R, rim)]);
-  const profile = rc.assembleWire([
-    top, rc.makeLine(at(R, -R, rim), at(R, -R, floor)), rc.makeLine(at(R, -R, floor), at(-R, -R, floor)), rc.makeLine(at(-R, -R, floor), at(-R, -R, rim)),
-  ]);
-  const spine = rc.assembleWire([rc.makeBezierCurve([at(-R, -R, rim), at(-R, 0, rim + 2 * D * R * R), at(-R, R, rim)])]);
+// Carry a closed profile along a spine without turning it (the profile stays upright the whole way).
+function slide(rc, oc, profile, spine) {
   const sweep = new oc.BRepOffsetAPI_MakePipeShell(spine.wrapped);
   const fixed = new oc.gp_Ax2(new oc.gp_Pnt(0, 0, 0), new oc.gp_Dir(0, 0, 1), new oc.gp_Dir(1, 0, 0));
-  sweep.SetMode(fixed); // keep the profile upright and unturned the whole way
+  sweep.SetMode(fixed);
   sweep.Add(profile.wrapped, false, false);
   sweep.Build(new oc.Message_ProgressRange());
   sweep.MakeSolid();
   const out = rc.cast(sweep.Shape());
   sweep.delete(); fixed.delete();
   return out;
+}
+
+// What an arm bevel removes. Its cross-section is the bevel's own profile (model/solid.js): straight
+// lines and circular arcs, drawn here as exactly those. With no run-out it is pushed straight along the
+// line from end to end. With a run-out it is carried along a path that is level in the middle and rises
+// in a parabola at each end, which is the same "rise" the sliced solid uses.
+function bevelTool(rc, oc, arm, c, T) {
+  const H = T + arm.drop * 2 + 4 * PAST; // top of the cutter, well clear of the body even where it has risen
+  const dir = ((c.x2 - c.x1) * arm.tx + (c.y2 - c.y1) * arm.ty) >= 0 ? 1 : -1;
+  const tx = arm.tx * dir, ty = arm.ty * dir;
+  // a point at s past the line and `depth` below the top, v along the line, lifted by dz
+  const at = (sv, depth, v = 0, dz = 0) => [c.x1 + arm.nx * sv + tx * v, c.y1 + arm.ny * sv + ty * v, T - depth + dz];
+  const profileAt = (v, dz) => {
+    const P = (q) => at(q[0], q[1], v, dz), segs = arm.prof.segs;
+    const edges = segs.map((g) => (g.m ? rc.makeThreePointArc(P(g.a), P(g.m), P(g.b)) : rc.makeLine(P(g.a), P(g.b))));
+    const first = segs[0].a, last = segs[segs.length - 1].b, top = -(H - T);
+    edges.push(rc.makeLine(P(last), P([last[0], top])), rc.makeLine(P([last[0], top]), P([first[0], top])), rc.makeLine(P([first[0], top]), P(first)));
+    return rc.assembleWire(edges);
+  };
+  if (!(arm.fade > 0)) return rc.basicFaceExtrusion(rc.makeFace(profileAt(0, 0)), new rc.Vector([tx * arm.l, ty * arm.l, 0]));
+  // z = drop * (d / fade)^2 from d = 0 to D is exactly a quadratic Bezier with points (0, 0), (D/2, 0), (D, z(D))
+  const F = arm.fade, D = F * 1.2, zD = arm.drop * (D / F) * (D / F);
+  const Q = (v, dz) => at(0, 0, v, dz);
+  const pieces = [rc.makeBezierCurve([Q(F - D, zD), Q(F - D / 2, 0), Q(F, 0)])];
+  if (arm.l - 2 * F > 1e-6) pieces.push(rc.makeLine(Q(F, 0), Q(arm.l - F, 0)));
+  pieces.push(rc.makeBezierCurve([Q(arm.l - F, 0), Q(arm.l - F + D / 2, 0), Q(arm.l - F + D, zD)]));
+  // the path runs a little past each end so the cutter is whole there; trim it back to the line's two ends
+  const lo = arm.prof.start - 20, hi = arm.prof.reach + 20;
+  const span = rc.basicFaceExtrusion(rc.makePolygon([at(lo, arm.drop + 3 * PAST), at(hi, arm.drop + 3 * PAST), at(hi, arm.drop + 3 * PAST, arm.l), at(lo, arm.drop + 3 * PAST, arm.l)]), new rc.Vector([0, 0, 2 * (H - T) + 2 * arm.drop + 8 * PAST]));
+  return slide(rc, oc, profileAt(F - D, zD), rc.assembleWire(pieces)).intersect(span);
+}
+
+// The shape a belly cut removes: depth = drop * (1 - u^2 - v^2), u across the bowl and v along it.
+// That surface is one parabola slid along another without turning, so it is built exactly that way.
+// A rim blend is a true rolled radius: the bowl is joined to a slab lying just under the back face, and
+// the inside corner between them is filleted, so the cutter rounds the rim as it comes through.
+function bellyBowl(rc, oc, dish) {
+  const R = 1.2; // the tool reaches past the rim of the cut, where its surface is already below the back
+  const D = dish.drop;
+  const at = (u, v, z) => [dish.x + dish.ux * dish.a * u + dish.vx * dish.b * v, dish.y + dish.uy * dish.a * u + dish.vy * dish.b * v, z];
+  // z = D * (1 - u^2 - v^2). Along u at v = -R, and along v at u = -R, each is exactly a quadratic Bezier.
+  const rim = D * (1 - 2 * R * R), floor = -3 * D - PAST;
+  const top = rc.makeBezierCurve([at(-R, -R, rim), at(0, -R, D), at(R, -R, rim)]);
+  const profile = rc.assembleWire([
+    top, rc.makeLine(at(R, -R, rim), at(R, -R, floor)), rc.makeLine(at(R, -R, floor), at(-R, -R, floor)), rc.makeLine(at(-R, -R, floor), at(-R, -R, rim)),
+  ]);
+  const bowl = slide(rc, oc, profile, rc.assembleWire([rc.makeBezierCurve([at(-R, -R, rim), at(-R, 0, rim + 2 * D * R * R), at(-R, R, rim)])]));
+  if (!(dish.blend > 0)) return bowl;
+  const pad = dish.blend + 20, w = 2 * R * Math.max(dish.a, dish.b) + 2 * pad;
+  const box = (z0, z1) => rc.drawRoundedRectangle(w, w).translate(dish.x, dish.y).sketchOnPlane('XY', z0).extrude(z1 - z0);
+  const joined = bowl.intersect(box(0, D + PAST)).fuse(box(-PAST, 0));
+  const onRim = (e) => {
+    const m = e.pointAt(0.5);
+    return Math.abs(e.startPoint.z) < 1e-6 && Math.abs(e.endPoint.z) < 1e-6 && Math.abs(m.z) < 1e-6 && Math.abs(dish.rho(m.x, m.y) - 1) < 1e-3;
+  };
+  try {
+    const out = joined.fillet((e) => (onRim(e) ? dish.blend : null));
+    if (!(rc.measureVolume(out) > rc.measureVolume(joined))) throw new Error('no blend');
+    return out;
+  } catch (err) {
+    throw new Error('The blend around the rim of the belly cut could not be rolled at this size. Make the blend smaller, then try again.');
+  }
 }
 
 // Take several cutting shapes out of the body in one operation. The cutters may overlap each other
@@ -153,13 +189,10 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
   // Everything that is cut away, taken out in one pass (much quicker than one cut at a time).
   const tools = [];
   const centroidXY = g.centroid || centroid(g.outline);
-  const arm = bevelPlane(design.contours.arm, g.outline, centroidXY);
-  if (arm) {
-    arm.drop = Math.min(arm.drop, T - 3); arm.slope = arm.drop / arm.sMax;
-    tools.push(bevelWedge(rc, arm, design.contours.arm, T));
-  }
+  const arm = bevelPlane(design.contours.arm, g.outline, centroidXY, T - 3);
+  if (arm) tools.push(bevelTool(rc, oc, arm, design.contours.arm, T));
   const dish = bellyDish(design.contours.belly, T - 3);
-  if (dish) tools.push(bellyBowl(rc, oc, dish, design.contours.belly));
+  if (dish) tools.push(bellyBowl(rc, oc, dish));
 
   // binding channel: everything outside its inner edge, from the channel floor up
   if (g.binding && g.binding.inner.length) {

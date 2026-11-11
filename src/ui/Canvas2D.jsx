@@ -79,7 +79,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     else if (k === 'pickup') { const p = design.pickups.find((q) => q.id === id); setSel({ kind: 'pickup', id }); drag.current = { kind: 'pickup', id, w0: w, p0: { ...p } }; }
     else if (k === 'control') { const c = design.controls.find((q) => q.id === id); setSel({ kind: 'control', id }); drag.current = { kind: 'control', id, w0: w, p0: { ...c } }; }
     else if (k === 'cavity') { const c = design.cavities.find((q) => q.id === id); setSel({ kind: 'cavity', id }); drag.current = { kind: 'cavity', id, w0: w, p0: { ...c } }; }
-    else if (k === 'bevel') { setSel({ kind: 'bevel', id }); drag.current = { kind: 'bevel', id, i }; }
+    else if (k === 'bevel') { setSel({ kind: 'bevel', id }); drag.current = { kind: 'bevel', id, i: id === 'belly' ? t.dataset.i : i }; }
     else if (k === 'reg') { drag.current = { kind: 'reg', i }; }
   };
 
@@ -132,6 +132,19 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       edit((ds) => ({ ...ds, controls: ds.controls.map((c) => (c.id === d.id ? { ...c, x: d.p0.x + (w.x - d.w0.x), y: d.p0.y + (w.y - d.w0.y) } : c)) }), T);
     } else if (d.kind === 'cavity') {
       edit((ds) => ({ ...ds, cavities: ds.cavities.map((c) => (c.id === d.id ? { ...c, x: d.p0.x + (w.x - d.w0.x), y: d.p0.y + (w.y - d.w0.y) } : c)) }), T);
+    } else if (d.kind === 'bevel' && d.id === 'belly') {
+      // the bowl: its middle moves it, the end square sets its length and turns it, the side square sets its reach
+      edit((ds) => {
+        const b = ds.contours.belly, vx = w.x - b.x, vy = w.y - b.y;
+        let next = b;
+        if (d.i === 'c') next = { ...b, x: w.x, y: w.y };
+        else if (d.i === 'l') {
+          let ang = Math.atan2(-vx, vy);
+          if (Math.abs(ang) < 0.035) ang = 0; // within 2 degrees, settle parallel to the centerline
+          next = { ...b, len: Math.max(20, 2 * Math.hypot(vx, vy)), angle: ang };
+        } else if (d.i === 'w') next = { ...b, reach: Math.max(5, Math.abs(vx * Math.cos(b.angle || 0) + vy * Math.sin(b.angle || 0))) };
+        return { ...ds, contours: { ...ds.contours, belly: next } };
+      }, T);
     } else if (d.kind === 'bevel') {
       edit((ds) => ({ ...ds, contours: { ...ds.contours, [d.id]: { ...ds.contours[d.id], ['x' + d.i]: w.x, ['y' + d.i]: w.y } } }), T);
     } else if (d.kind === 'reg') {
@@ -213,6 +226,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     return { dm, dM };
   }, [show.grid, view, size.w, size.h, units]);
 
+  // where the belly cut's three squares sit: its middle, the end of its length, and its reach toward the body
+  const bellyHandles = useMemo(() => {
+    const b = design.contours.belly;
+    if (!b.on) return null;
+    const ang = b.angle || 0, ux = Math.cos(ang), uy = Math.sin(ang);
+    const toward = ((g.centroid.x - b.x) * ux + (g.centroid.y - b.y) * uy) >= 0 ? 1 : -1;
+    return { c: { x: b.x, y: b.y }, l: { x: b.x - uy * (b.len / 2), y: b.y + ux * (b.len / 2) }, w: { x: b.x + ux * b.reach * toward, y: b.y + uy * b.reach * toward } };
+  }, [design.contours.belly, g.centroid]);
   const bellyEdge = useMemo(() => { const d = bellyDish(design.contours.belly); return d ? d.ellipse(1, 144) : null; }, [design.contours.belly]);
   const selNode = nodeSel >= 0 ? nodes[nodeSel] : null;
   const selNodeScreen = selNode ? S(selNode) : null;
@@ -255,7 +276,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
 
           {design.contours.arm.on && <path d={`M${design.contours.arm.x1} ${design.contours.arm.y1}L${design.contours.arm.x2} ${design.contours.arm.y2}`} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="9 4" {...NS} />}
           {bellyEdge && <path d={polyD(bellyEdge)} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="2 5" {...NS} clipPath="url(#bodyclip)" />}
-          {bellyEdge && <path d={`M${design.contours.belly.x1} ${design.contours.belly.y1}L${design.contours.belly.x2} ${design.contours.belly.y2}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
+          {bellyEdge && bellyHandles && <path d={`M${bellyHandles.l.x} ${bellyHandles.l.y}L${bellyHandles.c.x} ${bellyHandles.c.y}L${bellyHandles.w.x} ${bellyHandles.w.y}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
 
           {g.binding && g.binding.inner.map((p, i) => <path key={'bind' + i} d={polyD(p)} data-k="binding" stroke="var(--brass)" strokeWidth="1" strokeDasharray="5 3" fill="none" {...NS} />)}
           {show.cavities && <path d={polyD(g.pocket)} stroke="var(--bone-dim)" strokeWidth="1.2" fill="rgba(20,18,16,.55)" {...NS} clipPath="url(#bodyclip)" />}
@@ -314,13 +335,15 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
 
         {['arm', 'belly'].map((key) => {
           const c = design.contours[key];
-          if (!c.on) return null;
-          return [1, 2].map((i) => {
-            const p = S({ x: c['x' + i], y: c['y' + i] });
+          if (!c.on || (key === 'belly' && !bellyHandles)) return null;
+          const spots = key === 'arm' ? { 1: { x: c.x1, y: c.y1 }, 2: { x: c.x2, y: c.y2 } } : bellyHandles;
+          const first = S(spots[key === 'arm' ? 1 : 'c']);
+          return Object.keys(spots).map((i) => {
+            const p = S(spots[i]);
             return <g key={key + i} data-k="bevel" data-id={key} data-i={i} style={{ cursor: 'move' }}>
               <circle cx={p.x} cy={p.y} r="12" fill="transparent" /><rect x={p.x - 5} y={p.y - 5} width="10" height="10" rx="2" fill="var(--forge)" stroke="var(--ghost)" strokeWidth="1.6" />
             </g>;
-          }).concat(<text key={key + 't'} x={S({ x: c.x1, y: c.y1 }).x + 10} y={S({ x: c.x1, y: c.y1 }).y + (key === 'arm' ? -8 : 20)} fill="var(--ghost)" fontSize="10.5" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{key === 'arm' ? 'arm bevel starts (top)' : 'belly cut, deepest point (back)'}</text>);
+          }).concat(<text key={key + 't'} x={first.x + 10} y={first.y + (key === 'arm' ? -8 : 20)} fill="var(--ghost)" fontSize="10.5" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{key === 'arm' ? 'arm bevel starts (top)' : 'belly cut, center (back)'}</text>);
         })}
 
         {editing && nodes.map((n, i) => {

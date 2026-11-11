@@ -8,6 +8,7 @@ import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckB
 import { setSymmetric } from '../core/path.js';
 import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
 import { toolOffset, defaultRegHoles } from '../model/templates.js';
+import { bevelPlane, bellyDish } from '../model/solid.js';
 
 const DEG = 180 / Math.PI;
 
@@ -282,11 +283,29 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
             <>
               <Row label=""><Check checked={a.on} onChange={(v) => setC('arm', { on: v })}>Arm bevel on the top</Check></Row>
               {a.on && <Row label="Depth at the body edge" htmlFor="arm-drop" basis={start}><Len id="arm-drop" units={u} value={a.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('arm', { drop: v })} /></Row>}
-              {a.on && <p className="note">A flat cut between the two blue squares on the drawing, deepening toward the edge. Drag the squares to place it.</p>}
+              {a.on && (() => {
+                const made = bevelPlane(a, g.outline, g.centroid, design.body.thickness - 3);
+                const most = made ? made.prof.crownMax : 0;
+                return (
+                  <>
+                    <Row label="Curve of the cut" htmlFor="arm-crown"><Len id="arm-crown" units={u} value={a.crown || 0} min={0} max={Math.max(0, most)} onChange={(v) => setC('arm', { crown: v })} /></Row>
+                    <Row label="Blend where it meets the top" htmlFor="arm-blend"><Len id="arm-blend" units={u} value={a.blend || 0} min={0} max={2000} onChange={(v) => setC('arm', { blend: v })} /></Row>
+                    <Row label="Run-out at each end" htmlFor="arm-fade"><Len id="arm-fade" units={u} value={a.fade || 0} min={0} max={500} onChange={(v) => setC('arm', { fade: v })} /></Row>
+                    <p className="note">A cut between the two blue squares on the drawing, deepening toward the edge. Drag the squares to place it. With the three sizes above at 0 it is flat, has a sharp crease where it meets the top, and stops square at each end.</p>
+                    <p className="note"><b>Curve</b> is how far the cut bulges up from flat at its middle{made ? <>; on this bevel the most is {fmtWithUnit(most, u)}, where it meets the top with no crease</> : null}. <b>Blend</b> is the radius that rounds the crease{made && (a.blend || 0) > made.blend + 1e-6 ? <>; it is held to {fmtWithUnit(made.blend, u)} here, the most that fits</> : null}. <b>Run-out</b> is the length at each end over which the cut rises and fades to nothing{made && (a.fade || 0) > made.fade + 1e-6 ? <>; it is held to {fmtWithUnit(made.fade, u)}, half the line</> : null}.</p>
+                  </>
+                );
+              })()}
               <Row label=""><Check checked={b.on} onChange={(v) => setC('belly', { on: v })}>Belly cut on the back</Check></Row>
-              {b.on && <Row label="Depth at the body edge" htmlFor="belly-drop" basis={start}><Len id="belly-drop" units={u} value={b.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('belly', { drop: v })} /></Row>}
-              {b.on && <Row label="Length along the edge" htmlFor="belly-len" basis={start}><Len id="belly-len" units={u} value={b.len} min={20} max={400} onChange={(v) => setC('belly', { len: v })} /></Row>}
-              {b.on && <p className="note">A shallow dish. Drag one blue square to the deepest point on the body edge and the other to where the cut fades out.</p>}
+              {b.on && <Row label="Depth at its center" htmlFor="belly-drop" basis={start}><Len id="belly-drop" units={u} value={b.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('belly', { drop: v })} /></Row>}
+              {b.on && <Row label="Length" htmlFor="belly-len" basis={start}><Len id="belly-len" units={u} value={b.len} min={20} max={500} onChange={(v) => setC('belly', { len: v })} /></Row>}
+              {b.on && <Row label="Reach into the body" htmlFor="belly-reach" basis={start}><Len id="belly-reach" units={u} value={b.reach} min={5} max={300} onChange={(v) => setC('belly', { reach: v })} /></Row>}
+              {b.on && <Row label="Turned from the centerline" htmlFor="belly-angle"><Num id="belly-angle" value={Math.round(((b.angle || 0) * 180) / Math.PI * 10) / 10} min={-90} max={90} step={1} digits={1} suffix="°" onChange={(v) => setC('belly', { angle: (v * Math.PI) / 180 })} /></Row>}
+              {b.on && <Row label="Blend at the rim" htmlFor="belly-blend"><Len id="belly-blend" units={u} value={b.blend || 0} min={0} max={2000} onChange={(v) => setC('belly', { blend: v })} /></Row>}
+              {b.on && (() => {
+                const made = bellyDish(b, design.body.thickness - 3);
+                return <p className="note">A bowl in the back, centered on the middle blue square. Put that square on the body edge. Drag the square at the end of the bowl to lengthen it, or to turn it; its length starts parallel to the centerline. Drag the square at its side to widen it. <b>Blend</b> is the radius that rounds the rim where the bowl meets the back{made && (b.blend || 0) > made.blend + 1e-6 ? <>; it is held to {fmtWithUnit(made.blend, u)} here, the most this bowl takes</> : null}.{made && made.blend > 0 ? ' The 3D view shows the blended rim closely but not exactly; the saved 3D model rolls the true radius.' : ''}</p>;
+              })()}
               {(a.on || b.on) && <p className="note">Contours are carved by hand. The templates carry the guide lines and the depths to work to.</p>}
             </>
           );

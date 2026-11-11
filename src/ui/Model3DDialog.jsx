@@ -9,6 +9,7 @@ import { loadCadEngine } from './cadEngine.js';
 import { saveFile, slug, inViewer } from './files.js';
 import { fmtWithUnit } from '../core/units.js';
 import { edgeRounds } from '../model/design.js';
+import { bevelPlane, bellyDish } from '../model/solid.js';
 import { Dialog, Check, Seg } from './widgets.jsx';
 
 const mm = (v) => `${+v.toFixed(2)} mm`;
@@ -31,7 +32,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
   const pockets = g.cuts.filter((c) => Math.min(c.depth, T) > 0);
   const through = g.holes.filter((h) => h.side === 'through');
   const left = holesLeftOut(g);
-  const arm = design.contours.arm.on, belly = design.contours.belly.on;
+  const arm = bevelPlane(design.contours.arm, g.outline, g.centroid, T - 3), belly = bellyDish(design.contours.belly, T - 3);
 
   const save = async () => {
     setResult(null);
@@ -109,8 +110,8 @@ export default function Model3DDialog({ design, onClose, toast }) {
           ? <li>Edge roundovers rolled around the outline{rT > 0.05 ? `, top ${both(rT)}` : ''}{rB > 0.05 ? `, back ${both(rB)}` : ''}.</li>
           : <li>Square edges. The roundovers are left for you to rout by hand.</li>)}
         {g.binding && <li>The binding channel around the top edge, {both(g.binding.width)} wide and {both(g.binding.depth)} deep.</li>}
-        {arm && <li>The arm bevel, as a flat cut.</li>}
-        {belly && <li>The belly cut, as a smooth dish.</li>}
+        {arm && <li>The arm bevel, {arm.crown > 0 ? 'as a curved cut' : 'as a flat cut'}{arm.blend > 0 ? ', with its crease rounded' : ''}{arm.fade > 0 ? ', running out to nothing at each end' : ''}.</li>}
+        {belly && <li>The belly cut, as a smooth bowl{belly.blend > 0 ? ' with a rounded rim' : ''}.</li>}
         {withPockets && <li>{pockets.length} {pockets.length === 1 ? 'pocket' : 'pockets'} with upright walls, flat floors and true rounded corners: {pockets.map((c) => c.label).join(', ')}.</li>}
         {withPockets && <li>{through.length} round {through.length === 1 ? 'hole' : 'holes'} that go right through the body.</li>}
       </ul>

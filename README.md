@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 51 geometry and export tests (Node, no browser)
+    npm test               # 56 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -99,6 +99,16 @@ The app holds the body in two different 3D forms, on purpose:
   are true cylinders. Millimeters; z = 0 is the back face.
 
 The tests hold the two to the same volume within 0.1%, which checks each against the other.
+
+Body contours, the same in both solids:
+
+- **Arm bevel.** Depth = P(s) - rise(t): P is the cross-section past the line drawn on the top (a straight
+  line, or a circular arc when the cut is curved, with an optional circular blend at the crease), and
+  rise lifts the cut in a parabola over a chosen length at each end so it runs out to nothing. The CAD
+  solid draws that cross-section with true lines and arcs and carries it along the same rise curve.
+- **Belly cut.** A bowl, depth = drop x (1 - u^2 - v^2), set by a center, a length (parallel to the
+  centerline unless turned), a reach and a depth. Its rim blend is a true rolled radius in the CAD solid;
+  the sliced solid works the blend out approximately, and the screen says so.
 
 The same CAD solid can also be saved as a binary STL for programs that do not read STEP (Vectric Aspire
 is one): a closed mesh whose flat facets stay within 0.02 mm of the true surface. STL records no units;

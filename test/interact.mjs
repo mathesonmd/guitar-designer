@@ -407,7 +407,7 @@ await step('body thickness, bevels and wood change the weight; the 3D view draws
   await settle(900);
   const w1 = await page.locator('section[data-sec="body"] .note:has-text("Estimated body weight")').innerText();
   assert(w0 !== w1, 'weight changed with bevels');
-  assert(await page.locator('.stage [data-k="bevel"]').count() === 4, 'four bevel handles');
+  assert(await page.locator('.stage [data-k="bevel"]').count() === 5, 'two squares for the arm bevel and three for the belly cut');
   await page.selectOption('#b-wood', 'mahogany');
   await settle(900);
   const w2 = await page.locator('section[data-sec="body"] .note:has-text("Estimated body weight")').innerText();
@@ -457,7 +457,7 @@ await step('a 3D model of the body saves as STEP (rolled or square edges) and as
   // the click-through's later checks read millimeter files
   await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
   const said = await dlg.innerText();
-  assert(/arm bevel, as a flat cut/i.test(said) && /belly cut, as a smooth dish/i.test(said), 'the dialog lists the arm bevel and belly cut');
+  assert(/arm bevel, as a flat cut/i.test(said) && /belly cut, as a smooth bowl/i.test(said), 'the dialog lists the arm bevel and belly cut');
   assert(/Not in the 3D file/i.test(said) && /No depth has been entered/i.test(said), 'the dialog names the holes that are left out');
   assert(/has not been opened in Fusion or a CAM program/.test(said) && /Vectric Aspire does not/.test(said), 'the dialog says what the STEP file has and has not been checked in, and that Aspire does not open it');
   assert(fetched.length === 0, 'no 3D engine file was fetched before Save was clicked');
@@ -546,6 +546,52 @@ await step('roundover switches, a binding channel and hole depths for the hardwa
   const s3 = await state();
   assert(!s3.body.binding.on && !(group in s3.bridge.depths), 'binding off and depth cleared');
   return `${w0.match(/[\d.]+ lb/)[0]} → ${w1.match(/[\d.]+ lb/)[0]} with the back edge square; binding 2 × 7 mm; ${group} holes 12 mm deep`;
+});
+
+await step('the belly cut is sized like a bowl with three squares, and the arm bevel takes a curve, a crease blend and a run-out', async () => {
+  await tab('Design'); await settle(400); await openSec('body');
+  const b0 = (await state()).contours.belly;
+  assert(b0.on && b0.angle === 0, 'belly cut is on and parallel to the centerline');
+  const handle = async (i) => { const bb = await page.locator(`.stage [data-k="bevel"][data-id="belly"][data-i="${i}"]`).boundingBox(); return { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 }; };
+  const drag = async (i, dx, dy) => { const p = await handle(i); await page.mouse.move(p.x, p.y); await page.mouse.down(); for (let k = 1; k <= 6; k++) await page.mouse.move(p.x + (dx * k) / 6, p.y + (dy * k) / 6); await page.mouse.up(); };
+  const v = await view();
+  // the end square, pulled straight up the screen (toward the neck): longer, still parallel to the centerline
+  await drag('l', 0, -20 * v.s);
+  const b1 = (await state()).contours.belly;
+  near(b1.len, b0.len + 40, 1.5, 'length grew by twice the drag'); assert(b1.angle === 0 && Math.abs(b1.reach - b0.reach) < 1e-9, 'it stayed parallel and its reach did not change');
+  // the side square, pulled toward the centerline: wider, same length
+  const toward = b1.x < 0 ? 1 : -1;
+  await drag('w', toward * 15 * v.s, 0);
+  const b2 = (await state()).contours.belly;
+  near(b2.reach, b1.reach + 15, 1, 'reach grew by the drag'); assert(Math.abs(b2.len - b1.len) < 1e-9 && b2.angle === 0, 'length and angle did not change');
+  // the middle square moves the whole bowl
+  await drag('c', 0, 10 * v.s);
+  const b3 = (await state()).contours.belly;
+  near(b3.y, b2.y - 10, 1, 'center moved down'); assert(Math.abs(b3.len - b2.len) < 1e-9 && Math.abs(b3.reach - b2.reach) < 1e-9, 'size kept');
+  // pulling the end square sideways turns the bowl
+  await drag('l', 30 * v.s, 0);
+  const b4 = (await state()).contours.belly;
+  assert(Math.abs(b4.angle) > 0.1, 'the bowl turned: ' + b4.angle);
+  await page.keyboard.press('Control+z'); await settle(300);
+  await setField('#belly-blend', '40 mm');
+  await setField('#arm-crown', '2 mm'); await setField('#arm-blend', '30 mm'); await setField('#arm-fade', '50 mm');
+  const s = await state();
+  assert(Math.abs(s.contours.belly.blend - 40) < 1e-6 && s.contours.arm.crown > 0 && Math.abs(s.contours.arm.blend - 30) < 1e-6 && Math.abs(s.contours.arm.fade - 50) < 1e-6, 'smooth settings stored');
+  assert(/rolls the true radius/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the 3D view shows the rim blend approximately');
+  await tab('3D'); await settle(1500);
+  await page.screenshot({ path: path.join(out, '3d-smooth-contours.png') });
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  const said = await dlg.innerText();
+  assert(/arm bevel, as a curved cut, with its crease rounded, running out to nothing at each end/i.test(said) && /smooth bowl with a rounded rim/i.test(said), 'the dialog describes the smooth contours');
+  files.stepSmooth = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const smooth = files.stepSmooth.replace('.step', '-smooth.step'); fs.renameSync(files.stepSmooth, smooth); files.stepSmooth = smooth;
+  assert(fs.readFileSync(smooth, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file with the smooth contours saved');
+  await page.keyboard.press('Escape');
+  // back to plain contours for the steps that follow
+  await tab('Design'); await openSec('body');
+  await setField('#belly-blend', '0'); await setField('#arm-crown', '0'); await setField('#arm-blend', '0'); await setField('#arm-fade', '0');
+  return `length ${b0.len.toFixed(0)} → ${b1.len.toFixed(0)} mm, reach ${b1.reach.toFixed(0)} → ${b2.reach.toFixed(0)} mm, turned ${(b4.angle * 180 / Math.PI).toFixed(0)}° then undone; smooth STEP ${(fs.statSync(smooth).size / 1024).toFixed(0)} KB`;
 });
 
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {

@@ -3,6 +3,7 @@
 // y = 0 on the scale line (exactly one scale length from the nut), +y toward the neck.
 import { NECK_PRESETS } from '../data/necks.js';
 import { BINDING_START } from '../data/parts.js';
+import { bellyParams } from './solid.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
 import { SHOP } from '../data/shop.js';
@@ -149,9 +150,11 @@ export function defaultDesign() {
     controls: [makeControl('switch', 108, 3), makeControl('pot', 97, -32), makeControl('pot', 86, -66)],
     cavities: [{ ...makeCavity(98, -28, thickness), angle: -0.3 }],
     contours: {
-      arm: { on: false, x1: -164, y1: 30, x2: -70, y2: -150, drop: 12 },
-      // belly cut: (x1, y1) is the deepest point, at the body edge; (x2, y2) is how far in it reaches
-      belly: { on: false, x1: -123, y1: 100, x2: -52, y2: 106, len: 190, drop: 14 },
+      // arm bevel: a line on the top from (x1, y1) to (x2, y2). crown, blend and fade start at 0: a flat
+      // cut with a sharp crease that stops square at each end, as before they were added.
+      arm: { on: false, x1: -164, y1: 30, x2: -70, y2: -150, drop: 12, crown: 0, blend: 0, fade: 0 },
+      // belly cut: a bowl centered on (x, y) at the body edge. angle 0 puts its length parallel to the centerline.
+      belly: { on: false, x: -123, y: 100, angle: 0, len: 190, reach: 71, drop: 14, blend: 0 },
     },
     tooling: {
       outline: { mode: 'bearing', bit: IN / 2, bushing: (5 / 8) * IN },
@@ -184,7 +187,10 @@ export function normalizeDesign(raw) {
   out.pickups = (raw.pickups || d.pickups).filter((p) => PICKUPS[p.type]).map((p) => ({ ...makePickup(p.type), ...p }));
   out.controls = (raw.controls || d.controls).filter((c) => CONTROL_KINDS[c.kind]);
   out.cavities = (raw.cavities || d.cavities).map((c) => ({ ...makeCavity(0, 0, out.body.thickness), ...c }));
-  out.contours = { arm: { ...d.contours.arm, ...((raw.contours || {}).arm || {}) }, belly: { ...d.contours.belly, ...((raw.contours || {}).belly || {}) } };
+  // a belly cut saved as two points (older files) is turned into center, angle, length and reach
+  const rawBelly = (raw.contours || {}).belly || {};
+  out.contours = { arm: { ...d.contours.arm, ...((raw.contours || {}).arm || {}) }, belly: { ...d.contours.belly, ...(rawBelly.x1 !== undefined && rawBelly.x === undefined ? bellyParams({ ...d.contours.belly, x: undefined, ...rawBelly }) : rawBelly) } };
+  for (const k of ['x1', 'y1', 'x2', 'y2']) delete out.contours.belly[k];
   out.tooling = {
     ...d.tooling, ...(raw.tooling || {}),
     outline: { ...d.tooling.outline, ...((raw.tooling || {}).outline || {}) },

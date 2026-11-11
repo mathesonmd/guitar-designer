@@ -258,7 +258,7 @@ def step_report(path, rolled):
     check(not miss, 'a flat, level floor at the stated depth of every pocket (%d pockets)%s' % (len(want), '' if not miss else ': missing ' + ', '.join(miss)))
     curved = kinds.get('B_SPLINE_SURFACE_WITH_KNOTS', 0) + kinds.get('TOROIDAL_SURFACE', 0)
     return curved
-steps = sorted(f for f in glob.glob(D + '/*-body-*.step') if 'nopockets' not in f)
+steps = sorted(f for f in glob.glob(D + '/*-body-*.step') if 'nopockets' not in f and 'smooth' not in f)
 for f in glob.glob(D + '/*-body-nopockets.step'):
     bare = parse_step(open(f).read()); bk = [k for k, _ in bare.values()]
     print('STEP', os.path.basename(f), len(bare), 'entities')

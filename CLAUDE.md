@@ -25,9 +25,9 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 51 geometry and export tests (13 of them build the CAD solid)
+    npm test                  # 56 geometry and export tests (18 of them build the CAD solid)
     npm run build
-    node test/interact.mjs    # 31 click-through steps in headless Chromium
+    node test/interact.mjs    # 32 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
 
 All must pass. Add a test for every new behavior and for every bug fixed. The two browser scripts need
@@ -65,6 +65,10 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   enters them (`design.bridge.depths`, by group); until then the hole is a circle with no depth.
 - Vectors and model must share one bounding box, because Aspire users center each import. Keep guide
   lines and anything else inside the body outline's box.
+- Contours live in `solid.js` as depth functions (`bevelPlane`, `bevelProfile`, `bellyDish`); `step.js`
+  builds its cutters from the same profile pieces, so change the math in `solid.js` first. The belly rim
+  blend is the one place the two differ on purpose: true rolled radius in CAD, close approximation in the
+  slices, stated on screen. The arm bevel never cuts past either end of its line, in either solid.
 - `test/step.test.mjs` holds their volumes within 0.1% of each other. A new contour or cut goes into both,
   and that test is how a mistake in either one shows up. Check volume after every engine change: a faster
   way of cutting pockets once gave a body 7% too heavy with no error at all.
@@ -87,7 +91,8 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 
 **Built:** outline editor with four starting shapes and reference overlays; Fender-pattern neck presets
 and custom necks; six pickup cavities plus a custom rectangle; three bridges; controls and back cavity;
-arm bevel (flat) and belly cut (dished); live build checks; 3D view; templates with bearing or bushing
+arm bevel (flat or curved, with a crease blend and a run-out at each end) and belly cut (a bowl sized by
+center, length, reach and depth, with a rim blend); live build checks; 3D view; templates with bearing or bushing
 offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; 2D CNC vectors for
 pockets and holes, in millimeters or inches; a 3D model of the body as STEP (true solid) or STL (fine
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
@@ -95,8 +100,7 @@ roundover; a binding channel; hole depths entered per hardware.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
 carved tops, a 3D neck (profile, heel, volute, headstock), STEP roundovers larger than the outline's
-tightest outside curve, smooth run-outs for the arm bevel and belly cut (asked for; shape not yet agreed),
-the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
+tightest outside curve, the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
 
 **Never checked in the real world:** nothing has been cut on a laser or routed in wood; the files have
 not been opened in LightBurn, Vectric or Fusion (the owner opened a STEP file in his 3D printing slicer,
@@ -111,8 +115,8 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- What "smooth transitions" on the arm bevel and belly cut should look like (a rounded crease where the
-  cut meets the face, a curved bevel, ends that fade out, or all three).
+- Whether the smooth contours (crease blend, run-out, curve, rim blend) look and adjust the way he wants,
+  and whether the belly cut's three drag squares feel right.
 - Whether centering now lines the vectors up exactly with the model in Aspire, and whether inch files
   import at the right size.
 

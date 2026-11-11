@@ -168,9 +168,10 @@ export function buildTemplates(design, g) {
   const arm = bevelPlane(ca, g.outline, g.centroid);
   const dish = bellyDish(cb, design.body.thickness - 3);
   const armLine = arm ? [[{ x: ca.x1, y: ca.y1 }, { x: ca.x2, y: ca.y2 }]] : [];
-  const armNote = arm ? [`Arm bevel: flat, from the engraved line to ${lenLabel(Math.min(ca.drop, design.body.thickness - 3), u)} deep at the edge`] : [];
+  const arm0 = arm ? bevelPlane(ca, g.outline, g.centroid, design.body.thickness - 3) : null;
+  const armNote = arm0 ? [`Arm bevel: ${arm0.crown > 0 ? 'curved' : 'flat'}, from the engraved line to ${lenLabel(arm0.drop, u)} deep at the edge${arm0.blend > 0 ? `, crease rounded to a ${lenLabel(arm0.blend, u)} radius` : ''}${arm0.fade > 0 ? `, running out over ${lenLabel(arm0.fade, u)} at each end` : ''}`] : [];
   const dishMark = dish ? [[...dish.ellipse(1, 180), dish.ellipse(1, 180)[0]]] : [];
-  const dishNote = dish ? [`Belly cut: dished, inside the engraved curve, ${lenLabel(dish.drop, u)} deep at the edge`] : [];
+  const dishNote = dish ? [`Belly cut: dished, inside the engraved curve, ${lenLabel(dish.drop, u)} deep at the edge${dish.blend > 0 ? `, rim rounded to a ${lenLabel(dish.blend, u)} radius` : ''}`] : [];
 
   const ownPocket = tool.pocketSheet === 'own';
   const topCuts = g.cuts.filter((c) => c.side === 'top' && c.kind !== 'pickupPart' && !(ownPocket && c.kind === 'pocket'));
