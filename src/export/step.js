@@ -2,7 +2,7 @@
 // (model/solid.js), every surface here is exact: the outline keeps its Bezier curves, the edge roundovers
 // are rolled fillets, pockets have vertical walls with true arcs in the corners and flat floors, and
 // round holes are true cylinders. The arm bevel's cross-section and run-out are the same curves the
-// sliced solid uses, drawn exactly; the belly cut is the same bowl formula, with a true rolled rim blend.
+// sliced solid uses, drawn exactly; the belly cut is the same cone, with a true rolled rim blend.
 //
 // `rc` is the replicad module (an OpenCascade wrapper) with its engine already set. It is passed in so
 // the same code runs in the browser, where the engine is fetched on demand, and in the Node tests.
@@ -87,7 +87,9 @@ function bevelTool(rc, oc, arm, c, T) {
     edges.push(rc.makeLine(P(last), P([last[0], top])), rc.makeLine(P([last[0], top]), P([first[0], top])), rc.makeLine(P([first[0], top]), P(first)));
     return rc.assembleWire(edges);
   };
-  if (!(arm.fade > 0)) return rc.basicFaceExtrusion(rc.makeFace(profileAt(0, 0)), new rc.Vector([tx * arm.l, ty * arm.l, 0]));
+  // pushed straight along the line: between its two squares when bounded, right across the body when not
+  const v0 = arm.t0 * dir, v1 = arm.t1 * dir;
+  if (!(arm.fade > 0)) return rc.basicFaceExtrusion(rc.makeFace(profileAt(v0, 0)), new rc.Vector([tx * (v1 - v0), ty * (v1 - v0), 0]));
   // z = drop * (d / fade)^2 from d = 0 to D is exactly a quadratic Bezier with points (0, 0), (D/2, 0), (D, z(D))
   const F = arm.fade, D = F * 1.2, zD = arm.drop * (D / F) * (D / F);
   const Q = (v, dz) => at(0, 0, v, dz);
@@ -100,25 +102,20 @@ function bevelTool(rc, oc, arm, c, T) {
   return slide(rc, oc, profileAt(F - D, zD), rc.assembleWire(pieces)).intersect(span);
 }
 
-// The shape a belly cut removes: depth = drop * (1 - u^2 - v^2), u across the bowl and v along it.
-// That surface is one parabola slid along another without turning, so it is built exactly that way.
-// A rim blend is a true rolled radius: the bowl is joined to a slab lying just under the back face, and
+// The shape a belly cut removes: a cone, depth = drop * (1 - rho). It is drawn as straight lines from the
+// cone's point (at the cut's center, `drop` above the back face) to an ellipse lying below the back
+// face, which is exactly what a cone is.
+// A rim blend is a true rolled radius: the cone is joined to a slab lying just under the back face, and
 // the inside corner between them is filleted, so the cutter rounds the rim as it comes through.
-function bellyBowl(rc, oc, dish) {
-  const R = 1.2; // the tool reaches past the rim of the cut, where its surface is already below the back
-  const D = dish.drop;
-  const at = (u, v, z) => [dish.x + dish.ux * dish.a * u + dish.vx * dish.b * v, dish.y + dish.uy * dish.a * u + dish.vy * dish.b * v, z];
-  // z = D * (1 - u^2 - v^2). Along u at v = -R, and along v at u = -R, each is exactly a quadratic Bezier.
-  const rim = D * (1 - 2 * R * R), floor = -3 * D - PAST;
-  const top = rc.makeBezierCurve([at(-R, -R, rim), at(0, -R, D), at(R, -R, rim)]);
-  const profile = rc.assembleWire([
-    top, rc.makeLine(at(R, -R, rim), at(R, -R, floor)), rc.makeLine(at(R, -R, floor), at(-R, -R, floor)), rc.makeLine(at(-R, -R, floor), at(-R, -R, rim)),
-  ]);
-  const bowl = slide(rc, oc, profile, rc.assembleWire([rc.makeBezierCurve([at(-R, -R, rim), at(-R, 0, rim + 2 * D * R * R), at(-R, R, rim)])]));
-  if (!(dish.blend > 0)) return bowl;
-  const pad = dish.blend + 20, w = 2 * R * Math.max(dish.a, dish.b) + 2 * pad;
+function bellyCone(rc, oc, dish) {
+  const D = dish.drop, below = 2 * PAST, k = 1 + below / D; // the cone keeps widening below the back face
+  const turn = (Math.atan2(dish.uy, dish.ux) * 180) / Math.PI;
+  const base = rc.drawEllipse(dish.a * k, dish.b * k).rotate(turn).translate(dish.x, dish.y).sketchOnPlane('XY', -below);
+  const cone = base.loftWith([], { ruled: true, endPoint: [dish.x, dish.y, D] });
+  if (!(dish.blend > 0)) return cone;
+  const pad = dish.blend + 20, w = 2 * k * Math.max(dish.a, dish.b) + 2 * pad;
   const box = (z0, z1) => rc.drawRoundedRectangle(w, w).translate(dish.x, dish.y).sketchOnPlane('XY', z0).extrude(z1 - z0);
-  const joined = bowl.intersect(box(0, D + PAST)).fuse(box(-PAST, 0));
+  const joined = cone.intersect(box(0, D + PAST)).fuse(box(-PAST, 0));
   const onRim = (e) => {
     const m = e.pointAt(0.5);
     return Math.abs(e.startPoint.z) < 1e-6 && Math.abs(e.endPoint.z) < 1e-6 && Math.abs(m.z) < 1e-6 && Math.abs(dish.rho(m.x, m.y) - 1) < 1e-3;
@@ -192,7 +189,7 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
   const arm = bevelPlane(design.contours.arm, g.outline, centroidXY, T - 3);
   if (arm) tools.push(bevelTool(rc, oc, arm, design.contours.arm, T));
   const dish = bellyDish(design.contours.belly, T - 3);
-  if (dish) tools.push(bellyBowl(rc, oc, dish));
+  if (dish) tools.push(bellyCone(rc, oc, dish));
 
   // binding channel: everything outside its inner edge, from the channel floor up
   if (g.binding && g.binding.inner.length) {

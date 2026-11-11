@@ -457,7 +457,7 @@ await step('a 3D model of the body saves as STEP (rolled or square edges) and as
   // the click-through's later checks read millimeter files
   await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
   const said = await dlg.innerText();
-  assert(/arm bevel, as a flat cut/i.test(said) && /belly cut, as a smooth bowl/i.test(said), 'the dialog lists the arm bevel and belly cut');
+  assert(/arm bevel, rolled so it leaves the top with no crease, straight along its line right across the body/i.test(said) && /belly cut, as a shallow cone with a rounded rim/i.test(said), 'the dialog lists the arm bevel and belly cut');
   assert(/Not in the 3D file/i.test(said) && /No depth has been entered/i.test(said), 'the dialog names the holes that are left out');
   assert(/has not been opened in Fusion or a CAM program/.test(said) && /Vectric Aspire does not/.test(said), 'the dialog says what the STEP file has and has not been checked in, and that Aspire does not open it');
   assert(fetched.length === 0, 'no 3D engine file was fetched before Save was clicked');
@@ -484,7 +484,8 @@ await step('a 3D model of the body saves as STEP (rolled or square edges) and as
   assert(/Pockets and holes\. Cut them from the 2D vectors/.test(await dlg.innerText()), 'the list says pockets and holes are left out');
   files.stepPlain = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
   const plain = files.stepPlain.replace('.step', '-nopockets.step'); fs.renameSync(files.stepPlain, plain); files.stepPlain = plain;
-  assert(!/CYLINDRICAL_SURFACE/.test(fs.readFileSync(plain, 'utf8')), 'the contours-only model has no hole or corner cylinders');
+  // the rolled arm bevel is itself part of a cylinder; holes and pocket corners would add dozens more
+  assert((fs.readFileSync(plain, 'utf8').match(/CYLINDRICAL_SURFACE/g) || []).length <= 1, 'the contours-only model has no hole or corner cylinders');
   await dlg.locator('label.check:has-text("Put the pockets and holes in the 3D model") input').check();
   // the 2D vectors for pockets and holes
   files.cnc = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
@@ -548,7 +549,7 @@ await step('roundover switches, a binding channel and hole depths for the hardwa
   return `${w0.match(/[\d.]+ lb/)[0]} → ${w1.match(/[\d.]+ lb/)[0]} with the back edge square; binding 2 × 7 mm; ${group} holes 12 mm deep`;
 });
 
-await step('the belly cut is sized like a bowl with three squares, and the arm bevel takes a curve, a crease blend and a run-out', async () => {
+await step('the belly cut is sized with three squares, and the arm bevel can be rolled less, blended, and kept between its squares with a run-out', async () => {
   await tab('Design'); await settle(400); await openSec('body');
   const b0 = (await state()).contours.belly;
   assert(b0.on && b0.angle === 0, 'belly cut is on and parallel to the centerline');
@@ -574,23 +575,30 @@ await step('the belly cut is sized like a bowl with three squares, and the arm b
   assert(Math.abs(b4.angle) > 0.1, 'the bowl turned: ' + b4.angle);
   await page.keyboard.press('Control+z'); await settle(300);
   await setField('#belly-blend', '40 mm');
-  await setField('#arm-crown', '2 mm'); await setField('#arm-blend', '30 mm'); await setField('#arm-fade', '50 mm');
+  const fresh = (await state()).contours.arm;
+  assert(fresh.roll === 1 && fresh.bounded === false, 'the arm bevel starts fully rolled and runs across the body');
+  assert(await page.locator('#arm-blend').count() === 0 && await page.locator('#arm-fade').count() === 0, 'blend and run-out are not offered where they would do nothing');
+  await setField('#arm-roll', '60'); await setField('#arm-blend', '30 mm');
+  await page.locator('section[data-sec="body"] label.check:has-text("Keep the cut between the two squares") input').check();
+  await setField('#arm-fade', '50 mm');
   const s = await state();
-  assert(Math.abs(s.contours.belly.blend - 40) < 1e-6 && s.contours.arm.crown > 0 && Math.abs(s.contours.arm.blend - 30) < 1e-6 && Math.abs(s.contours.arm.fade - 50) < 1e-6, 'smooth settings stored');
+  assert(Math.abs(s.contours.belly.blend - 40) < 1e-6 && Math.abs(s.contours.arm.roll - 0.6) < 1e-6 && Math.abs(s.contours.arm.blend - 30) < 1e-6 && s.contours.arm.bounded && Math.abs(s.contours.arm.fade - 50) < 1e-6, 'contour settings stored');
   assert(/rolls the true radius/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the 3D view shows the rim blend approximately');
   await tab('3D'); await settle(1500);
   await page.screenshot({ path: path.join(out, '3d-smooth-contours.png') });
   await page.click('.viewopts button:has-text("Save files for CNC")');
   const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
   const said = await dlg.innerText();
-  assert(/arm bevel, as a curved cut, with its crease rounded, running out to nothing at each end/i.test(said) && /smooth bowl with a rounded rim/i.test(said), 'the dialog describes the smooth contours');
+  assert(/arm bevel, as a curved cut, with its crease rounded, running out to nothing at each end of its line/i.test(said) && /shallow cone with a rounded rim/i.test(said), 'the dialog describes the contours as set');
   files.stepSmooth = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
   const smooth = files.stepSmooth.replace('.step', '-smooth.step'); fs.renameSync(files.stepSmooth, smooth); files.stepSmooth = smooth;
   assert(fs.readFileSync(smooth, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file with the smooth contours saved');
   await page.keyboard.press('Escape');
   // back to plain contours for the steps that follow
   await tab('Design'); await openSec('body');
-  await setField('#belly-blend', '0'); await setField('#arm-crown', '0'); await setField('#arm-blend', '0'); await setField('#arm-fade', '0');
+  await setField('#arm-fade', '0');
+  await page.locator('section[data-sec="body"] label.check:has-text("Keep the cut between the two squares") input').uncheck();
+  await setField('#arm-blend', '0'); await setField('#arm-roll', '100');
   return `length ${b0.len.toFixed(0)} → ${b1.len.toFixed(0)} mm, reach ${b1.reach.toFixed(0)} → ${b2.reach.toFixed(0)} mm, turned ${(b4.angle * 180 / Math.PI).toFixed(0)}° then undone; smooth STEP ${(fs.statSync(smooth).size / 1024).toFixed(0)} KB`;
 });
 

@@ -2,7 +2,7 @@
 // Frame: x = 0 on the centerline (+x = treble side, as seen from the front with the neck up),
 // y = 0 on the scale line (exactly one scale length from the nut), +y toward the neck.
 import { NECK_PRESETS } from '../data/necks.js';
-import { BINDING_START } from '../data/parts.js';
+import { BINDING_START, BELLY_BLEND_START } from '../data/parts.js';
 import { bellyParams } from './solid.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
@@ -150,11 +150,12 @@ export function defaultDesign() {
     controls: [makeControl('switch', 108, 3), makeControl('pot', 97, -32), makeControl('pot', 86, -66)],
     cavities: [{ ...makeCavity(98, -28, thickness), angle: -0.3 }],
     contours: {
-      // arm bevel: a line on the top from (x1, y1) to (x2, y2). crown, blend and fade start at 0: a flat
-      // cut with a sharp crease that stops square at each end, as before they were added.
-      arm: { on: false, x1: -164, y1: 30, x2: -70, y2: -150, drop: 12, crown: 0, blend: 0, fade: 0 },
-      // belly cut: a bowl centered on (x, y) at the body edge. angle 0 puts its length parallel to the centerline.
-      belly: { on: false, x: -123, y: 100, angle: 0, len: 190, reach: 71, drop: 14, blend: 0 },
+      // arm bevel: the line through (x1, y1) and (x2, y2) on the top, running right across the body. It
+      // starts fully rolled (roll 1), the shape a flat sander leaves: straight along the line, curved across it.
+      arm: { on: false, x1: -164, y1: 30, x2: -70, y2: -150, drop: 12, roll: 1, blend: 0, bounded: false, fade: 0 },
+      // belly cut: a wide, short cone centered on (x, y) at the body edge. angle 0 puts its length parallel
+      // to the centerline. blend is the short smooth transition at its rim (a starting size: assumed).
+      belly: { on: false, x: -123, y: 100, angle: 0, len: 190, reach: 71, drop: 14, blend: BELLY_BLEND_START },
     },
     tooling: {
       outline: { mode: 'bearing', bit: IN / 2, bushing: (5 / 8) * IN },
@@ -191,6 +192,11 @@ export function normalizeDesign(raw) {
   const rawBelly = (raw.contours || {}).belly || {};
   out.contours = { arm: { ...d.contours.arm, ...((raw.contours || {}).arm || {}) }, belly: { ...d.contours.belly, ...(rawBelly.x1 !== undefined && rawBelly.x === undefined ? bellyParams({ ...d.contours.belly, x: undefined, ...rawBelly }) : rawBelly) } };
   for (const k of ['x1', 'y1', 'x2', 'y2']) delete out.contours.belly[k];
+  // a file from before the arm bevel was rolled keeps the cut it was drawn with: flat (or its own curve in
+  // millimeters) and kept between its two squares; and its belly cut keeps the rim it had
+  const rawArm = (raw.contours || {}).arm;
+  if (rawArm && rawArm.roll === undefined) { out.contours.arm.roll = null; out.contours.arm.crown = rawArm.crown || 0; out.contours.arm.bounded = rawArm.bounded !== undefined ? !!rawArm.bounded : true; }
+  if (rawBelly.x !== undefined || rawBelly.x1 !== undefined) out.contours.belly.blend = rawBelly.blend || 0;
   out.tooling = {
     ...d.tooling, ...(raw.tooling || {}),
     outline: { ...d.tooling.outline, ...((raw.tooling || {}).outline || {}) },

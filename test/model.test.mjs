@@ -378,7 +378,7 @@ test('engraved guide lines stop at the legend and at openings', () => {
   }
 });
 
-test('body contours remove the volume their shapes say: a bounded flat arm bevel and a dished belly cut', () => {
+test('body contours remove the volume their shapes say: a flat arm bevel, bounded or not, and a cone-shaped belly cut', () => {
   const square = () => {
     const d = defaultDesign();
     d.outline = { symmetric: false, nodes: [[-200, -200], [200, -200], [200, 200], [-200, 200]].map(([x, y]) => ({ x, y, ix: 0, iy: 0, ox: 0, oy: 0, k: 'c' })) };
@@ -391,11 +391,14 @@ test('body contours remove the volume their shapes say: a bounded flat arm bevel
   const a = square(); a.contours.arm = { on: true, x1: -200, y1: -100, x2: -100, y2: -200, drop: 10 };
   near(plain - vol(a), (100 * 100 * 10) / 6, 60, 'corner bevel volume');
   // the same bevel stopped halfway along its line removes half as much: wood past the end is left alone
-  const h = square(); h.contours.arm = { on: true, x1: -200, y1: -100, x2: -150, y2: -150, drop: 10 };
+  const h = square(); h.contours.arm = { on: true, x1: -200, y1: -100, x2: -150, y2: -150, drop: 10, bounded: true };
+  // and without `bounded` the cut runs on along its line, across the whole corner again
+  const u = square(); u.contours.arm = { on: true, x1: -200, y1: -100, x2: -150, y2: -150, drop: 10 };
+  near(plain - vol(u), (100 * 100 * 10) / 6, 60, 'unbounded bevel volume');
   near(plain - vol(h), (100 * 100 * 10) / 12, 40, 'bounded bevel volume');
-  // belly cut centered on a straight edge: half a paraboloid dish, pi * a * b * drop / 4
+  // belly cut centered on a straight edge: half a cone, pi * a * b * drop / 6
   const b = square(); b.contours.belly = { on: true, x1: -200, y1: 0, x2: -140, y2: 0, len: 160, drop: 12 };
-  near(plain - vol(b), (Math.PI * 60 * 80 * 12) / 4, 150, 'belly dish volume');
+  near(plain - vol(b), (Math.PI * 60 * 80 * 12) / 6, 150, 'belly cone volume');
   // the mesh encloses the same volume as the slices with both contours on
   const both = square(); both.contours.arm = a.contours.arm; both.contours.belly = b.contours.belly;
   const g = derive(both, { tol: 0.05 }), s = buildLayers(both, g), mesh = buildBodyMesh(s, g.outline);
@@ -403,10 +406,10 @@ test('body contours remove the volume their shapes say: a bounded flat arm bevel
   // dish normals: straight down at the deepest point, tilted toward the body's middle... away from it at the rim
   const n0 = s.dish.normal(-200, 0); near(n0[2], -1, 1e-9);
   const n1 = s.dish.normal(-150, 0); assert.ok(n1[0] < 0 && n1[2] < 0 && Math.abs(Math.hypot(...n1) - 1) < 1e-9);
-  near(s.dish.depth(-200, 0), 12, 1e-9); near(s.dish.depth(-140, 0), 0, 1e-9); near(s.dish.depth(-170, 0), 12 * 0.75, 1e-9);
+  near(s.dish.depth(-200, 0), 12, 1e-9); near(s.dish.depth(-140, 0), 0, 1e-9); near(s.dish.depth(-170, 0), 12 * 0.5, 1e-9);
   // the back template carries the edge of the cut and its depth; the top template carries the bevel line
   const t = buildTemplates(both, derive(both, { tol: 0.01 }));
-  assert.match(t.sheets.find((x) => x.id === 'back').legend.join(' '), /Belly cut: dished, inside the engraved curve, 0\.472 in deep at the edge/);
+  assert.match(t.sheets.find((x) => x.id === 'back').legend.join(' '), /Belly cut: a shallow cone, inside the engraved curve, 0\.472 in deep at the edge/);
   assert.match(t.sheets.find((x) => x.id === 'top').legend.join(' '), /Arm bevel: flat, from the engraved line to 0\.394 in deep at the edge/);
 });
 

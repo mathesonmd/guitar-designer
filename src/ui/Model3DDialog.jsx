@@ -110,8 +110,8 @@ export default function Model3DDialog({ design, onClose, toast }) {
           ? <li>Edge roundovers rolled around the outline{rT > 0.05 ? `, top ${both(rT)}` : ''}{rB > 0.05 ? `, back ${both(rB)}` : ''}.</li>
           : <li>Square edges. The roundovers are left for you to rout by hand.</li>)}
         {g.binding && <li>The binding channel around the top edge, {both(g.binding.width)} wide and {both(g.binding.depth)} deep.</li>}
-        {arm && <li>The arm bevel, {arm.crown > 0 ? 'as a curved cut' : 'as a flat cut'}{arm.blend > 0 ? ', with its crease rounded' : ''}{arm.fade > 0 ? ', running out to nothing at each end' : ''}.</li>}
-        {belly && <li>The belly cut, as a smooth bowl{belly.blend > 0 ? ' with a rounded rim' : ''}.</li>}
+        {arm && <li>The arm bevel, {arm.roll >= 0.99 ? 'rolled so it leaves the top with no crease' : arm.crown > 0 ? 'as a curved cut' : 'as a flat cut'}{arm.blend > 0 ? ', with its crease rounded' : ''}{arm.bounded ? (arm.fade > 0 ? ', running out to nothing at each end of its line' : ', stopping square at each end of its line') : ', straight along its line right across the body'}.</li>}
+        {belly && <li>The belly cut, as a shallow cone{belly.blend > 0 ? ' with a rounded rim' : ' with a sharp rim'}.</li>}
         {withPockets && <li>{pockets.length} {pockets.length === 1 ? 'pocket' : 'pockets'} with upright walls, flat floors and true rounded corners: {pockets.map((c) => c.label).join(', ')}.</li>}
         {withPockets && <li>{through.length} round {through.length === 1 ? 'hole' : 'holes'} that go right through the body.</li>}
       </ul>

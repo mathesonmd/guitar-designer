@@ -285,14 +285,15 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
               {a.on && <Row label="Depth at the body edge" htmlFor="arm-drop" basis={start}><Len id="arm-drop" units={u} value={a.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('arm', { drop: v })} /></Row>}
               {a.on && (() => {
                 const made = bevelPlane(a, g.outline, g.centroid, design.body.thickness - 3);
-                const most = made ? made.prof.crownMax : 0;
+                const rollNow = made ? Math.round(made.roll * 100) : 0;
                 return (
                   <>
-                    <Row label="Curve of the cut" htmlFor="arm-crown"><Len id="arm-crown" units={u} value={a.crown || 0} min={0} max={Math.max(0, most)} onChange={(v) => setC('arm', { crown: v })} /></Row>
-                    <Row label="Blend where it meets the top" htmlFor="arm-blend"><Len id="arm-blend" units={u} value={a.blend || 0} min={0} max={2000} onChange={(v) => setC('arm', { blend: v })} /></Row>
-                    <Row label="Run-out at each end" htmlFor="arm-fade"><Len id="arm-fade" units={u} value={a.fade || 0} min={0} max={500} onChange={(v) => setC('arm', { fade: v })} /></Row>
-                    <p className="note">A cut between the two blue squares on the drawing, deepening toward the edge. Drag the squares to place it. With the three sizes above at 0 it is flat, has a sharp crease where it meets the top, and stops square at each end.</p>
-                    <p className="note"><b>Curve</b> is how far the cut bulges up from flat at its middle{made ? <>; on this bevel the most is {fmtWithUnit(most, u)}, where it meets the top with no crease</> : null}. <b>Blend</b> is the radius that rounds the crease{made && (a.blend || 0) > made.blend + 1e-6 ? <>; it is held to {fmtWithUnit(made.blend, u)} here, the most that fits</> : null}. <b>Run-out</b> is the length at each end over which the cut rises and fades to nothing{made && (a.fade || 0) > made.fade + 1e-6 ? <>; it is held to {fmtWithUnit(made.fade, u)}, half the line</> : null}.</p>
+                    <Row label="How far the cut is rolled" htmlFor="arm-roll"><Num id="arm-roll" value={rollNow} min={0} max={100} step={5} suffix="%" onChange={(v) => setC('arm', { roll: v / 100 })} /></Row>
+                    {rollNow < 100 && <Row label="Blend where it meets the top" htmlFor="arm-blend"><Len id="arm-blend" units={u} value={a.blend || 0} min={0} max={2000} onChange={(v) => setC('arm', { blend: v })} /></Row>}
+                    <Row label=""><Check checked={!!a.bounded} onChange={(v) => setC('arm', { bounded: v })}>Keep the cut between the two squares</Check></Row>
+                    {a.bounded && <Row label="Run-out at each end" htmlFor="arm-fade"><Len id="arm-fade" units={u} value={a.fade || 0} min={0} max={500} onChange={(v) => setC('arm', { fade: v })} /></Row>}
+                    <p className="note">The shape a wide flat sander leaves when the body is held against it and rolled: straight along the dashed line, curved across it. The line runs through the two blue squares{a.bounded ? ', and the cut stops at them' : ' and on across the body'}. Drag the squares to place it.</p>
+                    <p className="note"><b>Rolled 100%</b> the cut leaves the top with no crease. <b>0%</b> is a flat cut with a crease{rollNow < 100 ? <>, which <b>Blend</b> rounds to a radius{made && (a.blend || 0) > made.blend + 1e-6 ? <> (held to {fmtWithUnit(made.blend, u)} here, the most that fits)</> : null}</> : null}.{a.bounded ? <> <b>Run-out</b> is the length at each end over which the cut rises and fades to nothing; at 0 it stops square{made && (a.fade || 0) > made.fade + 1e-6 ? <> (held to {fmtWithUnit(made.fade, u)}, half the line)</> : null}.</> : null}</p>
                   </>
                 );
               })()}
@@ -301,10 +302,10 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
               {b.on && <Row label="Length" htmlFor="belly-len" basis={start}><Len id="belly-len" units={u} value={b.len} min={20} max={500} onChange={(v) => setC('belly', { len: v })} /></Row>}
               {b.on && <Row label="Reach into the body" htmlFor="belly-reach" basis={start}><Len id="belly-reach" units={u} value={b.reach} min={5} max={300} onChange={(v) => setC('belly', { reach: v })} /></Row>}
               {b.on && <Row label="Turned from the centerline" htmlFor="belly-angle"><Num id="belly-angle" value={Math.round(((b.angle || 0) * 180) / Math.PI * 10) / 10} min={-90} max={90} step={1} digits={1} suffix="°" onChange={(v) => setC('belly', { angle: (v * Math.PI) / 180 })} /></Row>}
-              {b.on && <Row label="Blend at the rim" htmlFor="belly-blend"><Len id="belly-blend" units={u} value={b.blend || 0} min={0} max={2000} onChange={(v) => setC('belly', { blend: v })} /></Row>}
+              {b.on && <Row label="Blend at the rim" htmlFor="belly-blend" basis={<Basis kind="assumed" text="A starting size for the short smooth transition where the cut meets the back. Set it to what you want to carve." />}><Len id="belly-blend" units={u} value={b.blend || 0} min={0} max={2000} onChange={(v) => setC('belly', { blend: v })} /></Row>}
               {b.on && (() => {
                 const made = bellyDish(b, design.body.thickness - 3);
-                return <p className="note">A bowl in the back, centered on the middle blue square. Put that square on the body edge. Drag the square at the end of the bowl to lengthen it, or to turn it; its length starts parallel to the centerline. Drag the square at its side to widen it. <b>Blend</b> is the radius that rounds the rim where the bowl meets the back{made && (b.blend || 0) > made.blend + 1e-6 ? <>; it is held to {fmtWithUnit(made.blend, u)} here, the most this bowl takes</> : null}.{made && made.blend > 0 ? ' The 3D view shows the blended rim closely but not exactly; the saved 3D model rolls the true radius.' : ''}</p>;
+                return <p className="note">A wide, short cone taken out of the back: deepest at the middle blue square and rising in a straight slope to its rim. Put the middle square on the body edge. Drag the square at the end of the cut to lengthen it, or to turn it; its length starts parallel to the centerline. Drag the square at its side to widen it. <b>Blend</b> is the radius of the short smooth transition where the cone meets the back{made && (b.blend || 0) > made.blend + 1e-6 ? <>; it is held to {fmtWithUnit(made.blend, u)} here, the most this cut takes</> : null}.{made && made.blend > 0 ? ' The 3D view shows the blended rim closely but not exactly; the saved 3D model rolls the true radius.' : ''}</p>;
               })()}
               {(a.on || b.on) && <p className="note">Contours are carved by hand. The templates carry the guide lines and the depths to work to.</p>}
             </>

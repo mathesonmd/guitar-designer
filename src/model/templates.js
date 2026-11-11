@@ -167,11 +167,11 @@ export function buildTemplates(design, g) {
   const ca = design.contours.arm, cb = design.contours.belly;
   const arm = bevelPlane(ca, g.outline, g.centroid);
   const dish = bellyDish(cb, design.body.thickness - 3);
-  const armLine = arm ? [[{ x: ca.x1, y: ca.y1 }, { x: ca.x2, y: ca.y2 }]] : [];
+  const armLine = arm ? [arm.ends] : []; // right across the body unless the cut is kept between its squares
   const arm0 = arm ? bevelPlane(ca, g.outline, g.centroid, design.body.thickness - 3) : null;
-  const armNote = arm0 ? [`Arm bevel: ${arm0.crown > 0 ? 'curved' : 'flat'}, from the engraved line to ${lenLabel(arm0.drop, u)} deep at the edge${arm0.blend > 0 ? `, crease rounded to a ${lenLabel(arm0.blend, u)} radius` : ''}${arm0.fade > 0 ? `, running out over ${lenLabel(arm0.fade, u)} at each end` : ''}`] : [];
+  const armNote = arm0 ? [`Arm bevel: ${arm0.roll >= 0.99 ? 'rolled' : arm0.crown > 0 ? 'curved' : 'flat'}, from the engraved line to ${lenLabel(arm0.drop, u)} deep at the edge${arm0.blend > 0 ? `, crease rounded to a ${lenLabel(arm0.blend, u)} radius` : ''}${arm0.fade > 0 ? `, running out over ${lenLabel(arm0.fade, u)} at each end` : ''}`] : [];
   const dishMark = dish ? [[...dish.ellipse(1, 180), dish.ellipse(1, 180)[0]]] : [];
-  const dishNote = dish ? [`Belly cut: dished, inside the engraved curve, ${lenLabel(dish.drop, u)} deep at the edge${dish.blend > 0 ? `, rim rounded to a ${lenLabel(dish.blend, u)} radius` : ''}`] : [];
+  const dishNote = dish ? [`Belly cut: a shallow cone, inside the engraved curve, ${lenLabel(dish.drop, u)} deep at the edge${dish.blend > 0 ? `, rim rounded to a ${lenLabel(dish.blend, u)} radius` : ''}`] : [];
 
   const ownPocket = tool.pocketSheet === 'own';
   const topCuts = g.cuts.filter((c) => c.side === 'top' && c.kind !== 'pickupPart' && !(ownPocket && c.kind === 'pocket'));

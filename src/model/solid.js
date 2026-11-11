@@ -11,13 +11,15 @@ const BEVEL_STEP = 1.0;
 const DISH_STEP = 0.75;
 
 // ---------------------------------------------------------------------------------------------
-// Arm bevel. A cut that starts at a line drawn on the top and deepens toward the body edge.
-//   drop   how deep it is at the body edge
-//   crown  0 = a flat cut. More = the cut bulges up into a curve, by this much at its middle, until at
-//          the most it meets the top with no crease at all.
-//   blend  radius that rounds the crease where the cut meets the top
-//   fade   0 = the cut stops square at each end of the line (wood past the end is left alone).
-//          More = over this length at each end the cut rises and runs out to nothing.
+// Arm bevel. A cut that starts at a line drawn on the top and deepens toward the body edge. It is the
+// shape a wide flat sander leaves when the body is held against it and rolled: straight along the line,
+// curved across it. The line runs on past its two squares, right across the body, unless `bounded`.
+//   drop     how deep it is at the body edge
+//   roll     0 = a flat cut with a crease where it meets the top. 1 = rolled all the way, so the cut
+//            leaves the top with no crease. (Older files give `crown` in millimeters instead.)
+//   blend    radius that rounds whatever crease is left where the cut meets the top
+//   bounded  true = the cut is kept between the two squares, and wood past either one is left alone
+//   fade     only when bounded: over this length at each end the cut rises and runs out to nothing
 // Everything is described by one depth function, depth(x, y) = P(s) - rise(t): P is the cross-section
 // (s = distance past the line), rise is how far the cut has lifted at distance t along the line. The
 // CAD solid is built from the same cross-section and the same rise curve, so the two agree.
@@ -32,7 +34,11 @@ export function bevelPlane(c, outline, centroid, maxDrop = Infinity) {
   if ((centroid.x - c.x1) * nx + (centroid.y - c.y1) * ny > 0) { nx = -nx; ny = -ny; }
   const s = (x, y) => (x - c.x1) * nx + (y - c.y1) * ny;  // distance past the line
   const t = (x, y) => (x - c.x1) * tx + (y - c.y1) * ty;  // distance along it
-  const inSpan = (x, y) => { const v = t(x, y); return v >= -1e-6 && v <= l + 1e-6; };
+  const bounded = !!c.bounded;
+  const inSpan = (x, y) => { if (!bounded) return true; const v = t(x, y); return v >= -1e-6 && v <= l + 1e-6; };
+  // how far the body reaches along the line, so an unbounded cut can be drawn right across it
+  let t0 = 0, t1 = l;
+  if (!bounded) { t0 = Infinity; t1 = -Infinity; for (const q of outline) { const v = t(q.x, q.y); if (v < t0) t0 = v; if (v > t1) t1 = v; } t0 -= 10; t1 += 10; }
   // the deepest point is the farthest body edge between the two ends (sampled along each outline segment)
   let sMax = 0;
   for (let i = 0, n = outline.length; i < n; i++) {
@@ -41,8 +47,9 @@ export function bevelPlane(c, outline, centroid, maxDrop = Infinity) {
   }
   if (sMax < 0.5) return null;
   const drop = Math.min(c.drop, maxDrop);
-  const prof = bevelProfile(sMax, drop, c.crown || 0, c.blend || 0);
-  const fade = Math.max(0, Math.min(c.fade || 0, l / 2));
+  const crownMax = bevelCrownMax(sMax, drop);
+  const prof = bevelProfile(sMax, drop, c.roll !== undefined && c.roll !== null ? Math.max(0, Math.min(1, c.roll)) * crownMax : (c.crown || 0), c.blend || 0);
+  const fade = bounded ? Math.max(0, Math.min(c.fade || 0, l / 2)) : 0;
   // how far the cut has lifted, t along the line: nothing in the middle, a parabola up through `drop` at each end
   const rise = (v) => {
     if (!(fade > 0)) return 0;
@@ -57,7 +64,7 @@ export function bevelPlane(c, outline, centroid, maxDrop = Infinity) {
   const at = (v, u) => ({ x: c.x1 + tx * v + nx * u, y: c.y1 + ty * v + ny * u });
   // what one slice loses: everything where the cut is deeper than dz
   const region = (dz) => {
-    if (!(fade > 0)) { const lim = prof.Pinv(dz); return lim === null ? [] : [[at(0, lim), at(l, lim), at(l, B), at(0, B)]]; }
+    if (!(fade > 0)) { const lim = prof.Pinv(dz); return lim === null ? [] : [[at(t0, lim), at(t1, lim), at(t1, B), at(t0, B)]]; }
     const N = 120, v0 = 0, v1 = l, runs = [];
     let cur = null;
     for (let i = 0; i <= N; i++) {
@@ -77,7 +84,15 @@ export function bevelPlane(c, outline, centroid, maxDrop = Infinity) {
     const h = 0.02, gx = (depth(x + h, y) - depth(x - h, y)) / (2 * h), gy = (depth(x, y + h) - depth(x, y - h)) / (2 * h), k = Math.hypot(gx, gy, 1);
     return [gx / k, gy / k, 1 / k];
   };
-  return { nx, ny, tx, ty, l, sMax, drop, fade, s, t, inSpan, depth, region, normal, rise, prof, crown: prof.crown, blend: prof.blend, slope: drop / sMax };
+  // the stretch of the line to draw: between the squares when bounded, right across the body when not
+  const ends = [at(t0, 0), at(t1, 0)];
+  return { nx, ny, tx, ty, l, sMax, drop, fade, bounded, t0, t1, ends, s, t, inSpan, depth, region, normal, rise, prof, crown: prof.crown, roll: crownMax > 0 ? Math.min(1, prof.crown / crownMax) : 0, blend: prof.blend, slope: drop / sMax };
+}
+
+// The most an arm bevel can bulge up from flat: an arc that leaves the top with no crease.
+export function bevelCrownMax(sMax, drop) {
+  const L = Math.hypot(sMax, drop), Rt = (L * L) / (2 * drop);
+  return Rt - Math.sqrt(Math.max(0, Rt * Rt - (L * L) / 4));
 }
 
 // Cross-section of an arm bevel: depth below the top as a function of s, the distance past the line.
@@ -153,14 +168,15 @@ export function bellyParams(c) {
   return c;
 }
 
-// A belly cut is a bowl in the back of the body, centered on a point at the body edge.
+// A belly cut is a wide, short cone taken out of the back of the body: deepest at its center, on the
+// body edge, and rising in a straight slope to its rim.
 //   len    its full length; with angle 0 this runs parallel to the centerline
 //   reach  how far it reaches from its center in toward the body
 //   drop   how deep it is at its center
-//   blend  radius that rounds the rim where the bowl meets the back
-// Depth = drop * (1 - u^2 - v^2): u runs across (1 at the reach), v along (1 at half the length).
-// The rim blend is worked out here by treating the bowl as straight over the width of the blend, which
-// is close but not exact; the CAD solid rolls a true radius around the rim.
+//   blend  radius of the short smooth transition where the cone meets the back
+// Depth = drop * (1 - rho), rho = sqrt(u^2 + v^2): u runs across (1 at the reach), v along (1 at half
+// the length). The rim blend is worked out here from the cone's slope at each point of the rim, which is
+// close but not exact for a cone that is longer than it is wide; the CAD solid rolls a true radius.
 // Returns null when the cut is off.
 export function bellyDish(cIn, maxDrop = Infinity) {
   const c = bellyParams(cIn);
@@ -173,11 +189,11 @@ export function bellyDish(cIn, maxDrop = Infinity) {
   const uv = (x, y) => [((x - c.x) * ux + (y - c.y) * uy) / a, ((x - c.x) * vx + (y - c.y) * vy) / b];
   const rho = (x, y) => { const [u, v] = uv(x, y); return Math.hypot(u, v); };
   // steepness of the bowl where it meets the back, in the direction (cu, cv) from the center
-  const rimSlope = (cu, cv) => 2 * drop * Math.hypot(cu / a, cv / b);
+  const rimSlope = (cu, cv) => drop * Math.hypot(cu / a, cv / b);
   // the blend may not be so big that it swallows the bowl at its steepest place
   let blend = Math.max(0, c.blend || 0);
   if (blend > 0) {
-    const G = 2 * drop / Math.min(a, b), phi = Math.atan(G), most = (0.5 * drop / G) / (Math.tan(phi / 2) * Math.cos(phi));
+    const G = drop / Math.min(a, b), phi = Math.atan(G), most = (0.5 * drop / G) / (Math.tan(phi / 2) * Math.cos(phi));
     blend = Math.min(blend, most);
     if (blend < 1e-6) blend = 0;
   }
@@ -189,7 +205,7 @@ export function bellyDish(cIn, maxDrop = Infinity) {
     return blend - Math.sqrt(Math.max(0, blend * blend - (e - ec) * (e - ec)));
   };
   const depth = (x, y) => {
-    const [u, v] = uv(x, y), r = Math.hypot(u, v), d0 = drop * (1 - r * r);
+    const [u, v] = uv(x, y), r = Math.hypot(u, v), d0 = drop * (1 - r);
     if (!(blend > 0)) return Math.max(0, d0);
     if (r < 1e-9) return drop;
     const G = rimSlope(u / r, v / r);
@@ -198,15 +214,15 @@ export function bellyDish(cIn, maxDrop = Infinity) {
   const point = (cu, cv, k) => ({ x: c.x + ux * a * k * cu + vx * b * k * cv, y: c.y + uy * a * k * cu + vy * b * k * cv });
   return {
     drop, a, b, rho, depth, blend, x: c.x, y: c.y, angle: ang, ux, uy, vx, vy,
-    // the edge of the cut at a given fraction of its full size (1 = where the bare bowl meets the back face)
+    // the edge of the cut at a given fraction of its full size (1 = where the bare cone meets the back face)
     ellipse: (k = 1, n = 120) => Array.from({ length: n }, (_, i) => { const th = (i / n) * 2 * Math.PI; return point(Math.cos(th), Math.sin(th), k); }),
     // the edge of the cut at height z above the back face (it narrows as it rises into the body)
     outlineAt: (z, n = 144) => Array.from({ length: n }, (_, i) => {
       const th = (i / n) * 2 * Math.PI, cu = Math.cos(th), cv = Math.sin(th);
-      if (!(blend > 0)) return point(cu, cv, Math.sqrt(Math.max(0, 1 - z / drop)));
+      if (!(blend > 0)) return point(cu, cv, Math.max(0, 1 - z / drop));
       const G = rimSlope(cu, cv), phi = Math.atan(G), ec = -blend * Math.tan(phi / 2), et = blend * Math.tan(phi / 2) * Math.cos(phi);
       const e = z >= G * et ? z / G : ec + Math.sqrt(Math.max(0, blend * blend - (blend - z) * (blend - z)));
-      return point(cu, cv, Math.sqrt(Math.max(0, 1 - (G * e) / drop)));
+      return point(cu, cv, Math.max(0, 1 - (G * e) / drop));
     }),
     // surface normal pointing out of the wood (down, into the cut)
     normal: (x, y) => {
@@ -282,7 +298,7 @@ export function buildLayers(design, g) {
       tag.arm = { dz: T - zm };
     }
     if (dish && zm < dish.drop) {
-      region = difference(region, [dish.outlineAt(zm)]); // the bowl narrows as it rises into the body
+      region = difference(region, [dish.outlineAt(zm)]); // the cone narrows as it rises into the body
       tag.dish = { z: zm };
     }
     const active = removed.filter((r) => zm > r.z0 && zm < r.z1).map((r) => r.poly);

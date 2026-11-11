@@ -262,7 +262,11 @@ steps = sorted(f for f in glob.glob(D + '/*-body-*.step') if 'nopockets' not in 
 for f in glob.glob(D + '/*-body-nopockets.step'):
     bare = parse_step(open(f).read()); bk = [k for k, _ in bare.values()]
     print('STEP', os.path.basename(f), len(bare), 'entities')
-    check(bk.count('MANIFOLD_SOLID_BREP') == 1 and bk.count('CYLINDRICAL_SURFACE') == 0, 'the contours-only model is one solid with no holes or pocket corners in it')
+    def upright(a):
+        r = refs(bare[refs(a)[0]][1]); ax = nums(bare[r[1]][1])[-3:] if len(r) > 1 else [0.0, 0.0, 1.0]
+        return abs(abs(ax[2]) - 1) < 1e-9
+    stand = sum(1 for k, a in bare.values() if k == 'CYLINDRICAL_SURFACE' and upright(a))
+    check(bk.count('MANIFOLD_SOLID_BREP') == 1 and stand == 0, 'the contours-only model is one solid with no holes or pocket corners in it (no upright cylinders; a rolled arm bevel is a cylinder lying on its side)')
 if not steps: print('  skip STEP checks: no 3D model was saved')
 else:
     curved = {('rolled' if 'rolled' in f else 'square'): step_report(f, 'rolled' in f) for f in steps}

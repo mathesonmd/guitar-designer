@@ -177,10 +177,10 @@ test('an inch STL is the same mesh with every coordinate divided by 25.4', () =>
   assert.match(String.fromCharCode(...inch.slice(0, 70)), /units are inches/);
 });
 
-// ---- smooth contours: crease blend, run-out and curve on the arm bevel; the belly cut as a bowl ----
+// ---- contours: the arm bevel as a rolled cut, the belly cut as a cone ----
 const bare = () => { const d = defaultDesign(); d.pickups = []; d.cavities = []; d.controls = []; d.bridge = makeBridge('none'); return d; };
 
-test('arm bevel cross-section: the pieces join with no step and no kink, and full curve leaves no crease', () => {
+test('arm bevel cross-section: the pieces join with no step and no kink, and a full roll leaves no crease', () => {
   for (const [crown, blend] of [[0, 30], [2, 30], [1, 200], [0, 0], [2.5, 0]]) {
     const p = bevelProfile(105, 12, crown, blend), e = 1e-4;
     assert.ok(Math.abs(p.P(105) - 12) < 1e-9, 'full depth at the body edge');
@@ -193,13 +193,31 @@ test('arm bevel cross-section: the pieces join with no step and no kink, and ful
     let last = -1; for (let u = p.start - 1; u < 105; u += 0.5) { assert.ok(p.P(u) >= last - 1e-9, 'always deepening'); last = p.P(u); }
   }
   const full = bevelProfile(105, 12, 999, 0);
-  assert.ok(Math.abs(full.crown - full.crownMax) < 0.01 && (full.P(0.5) - full.P(0)) / 0.5 < 0.01, 'at full curve the cut leaves the top almost level');
+  assert.ok(Math.abs(full.crown - full.crownMax) < 0.01 && (full.P(0.5) - full.P(0)) / 0.5 < 0.01, 'at a full roll the cut leaves the top almost level');
   const tight = bevelProfile(105, 12, 0, 5000);
   assert.ok(tight.blend < 5000 && tight.blend > 100, 'a blend too big for the bevel is held to what fits');
 });
 
-test('arm bevel run-out: full depth in the middle, nothing at either end, and no cut beyond the ends', () => {
-  const d = bare(); d.contours.arm = { ...d.contours.arm, on: true, fade: 50 };
+test('the arm bevel is straight along its line and curved across it, like a cut from a flat sander', () => {
+  const d = bare(); d.contours.arm.on = true;
+  assert.deepEqual([d.contours.arm.roll, d.contours.arm.bounded], [1, false], 'a new bevel is fully rolled and runs right across the body');
+  const g = derive(d, { tol: 0.005 }), c = d.contours.arm, arm = bevelPlane(c, g.outline, g.centroid, 40);
+  const at = (v, s) => [c.x1 + arm.tx * v + arm.nx * s, c.y1 + arm.ty * v + arm.ny * s];
+  // straight along the line: the same depth anywhere along it, including past both squares
+  for (const s of [5, arm.sMax / 2, arm.sMax]) for (const v of [-80, 0, 60, arm.l, arm.l + 80]) assert.ok(Math.abs(arm.depth(...at(v, s)) - arm.depth(...at(arm.l / 2, s))) < 1e-9);
+  // curved across it: a circular arc, level where it leaves the top and at full depth at the body edge
+  assert.ok(Math.abs(arm.depth(...at(50, arm.sMax)) - 12) < 1e-9);
+  assert.ok(arm.depth(...at(50, 0.5)) < 0.01, 'no crease where it leaves the top');
+  const q = arm.sMax / 4, d1 = arm.depth(...at(50, q)), d2 = arm.depth(...at(50, 2 * q)), d3 = arm.depth(...at(50, 3 * q));
+  assert.ok(d2 - d1 > d1 && d3 - d2 > d2 - d1, 'it steepens steadily toward the edge');
+  const n = arm.normal(...at(50, 2 * q));
+  assert.ok(Math.abs(n[0] * arm.tx + n[1] * arm.ty) < 1e-6, 'the surface does not tilt along the line at all');
+  // the line to draw runs from one side of the body to the other
+  assert.ok(arm.t0 < -20 && arm.t1 > arm.l + 20);
+});
+
+test('arm bevel kept between its squares, with a run-out: full depth in the middle, nothing at either end', () => {
+  const d = bare(); d.contours.arm = { ...d.contours.arm, on: true, bounded: true, fade: 50 };
   const g = derive(d, { tol: 0.005 });
   const flat = bevelPlane({ ...d.contours.arm, fade: 0 }, g.outline, g.centroid, 40), arm = bevelPlane(d.contours.arm, g.outline, g.centroid, 40);
   const at = (v, s) => [d.contours.arm.x1 + arm.tx * v + arm.nx * s, d.contours.arm.y1 + arm.ty * v + arm.ny * s];
@@ -210,14 +228,15 @@ test('arm bevel run-out: full depth in the middle, nothing at either end, and no
   assert.equal(arm.depth(...at(-5, arm.sMax + 30)), 0, 'wood past the end of the line is left alone');
   assert.ok(arm.depth(...at(25, arm.sMax)) > 0 && arm.depth(...at(25, arm.sMax)) < flat.depth(...at(25, arm.sMax)), 'shallower partway through the run-out');
   assert.equal(bevelPlane({ ...d.contours.arm, fade: 5000 }, g.outline, g.centroid, 40).fade, arm.l / 2);
+  assert.equal(bevelPlane({ ...d.contours.arm, bounded: false }, g.outline, g.centroid, 40).fade, 0, 'a run-out only applies to a cut kept between its squares');
 });
 
-test('every smooth-contour setting removes the same wood in the CAD solid as in the sliced solid', () => {
+test('every contour setting removes the same wood in the CAD solid as in the sliced solid', () => {
   const plain = build(bare());
   const cases = [
-    { arm: { blend: 60 } }, { arm: { crown: 2 } }, { arm: { fade: 60 } }, { arm: { crown: 2, blend: 40, fade: 60 } },
-    { belly: { blend: 40 } }, { belly: { angle: 0.4, blend: 40, len: 150, reach: 55 } },
-    { arm: { crown: 2, blend: 40, fade: 60 }, belly: { blend: 60 } },
+    { arm: {} }, { arm: { roll: 0 } }, { arm: { roll: 0, blend: 60 } }, { arm: { roll: 0.5, blend: 40 } }, { arm: { bounded: true } }, { arm: { bounded: true, fade: 60, roll: 0.6, blend: 40 } },
+    { belly: { blend: 0 } }, { belly: {} }, { belly: { angle: 0.4, blend: 40, len: 150, reach: 55 } },
+    { arm: {}, belly: {} },
   ];
   for (const c of cases) {
     const d = bare();
@@ -227,37 +246,43 @@ test('every smooth-contour setting removes the same wood in the CAD solid as in 
     assert.equal(r.cad.valid, true, name);
     assert.ok(pct(r.cad.volume, r.slices.volume) < 0.1, `${name}: body volume differs by ${pct(r.cad.volume, r.slices.volume).toFixed(3)}%`);
     const cad = plain.cad.volume - r.cad.volume, sl = plain.slices.volume - r.slices.volume;
-    assert.ok(cad > 5000 && pct(cad, sl) < 2, `${name}: wood removed ${cad.toFixed(0)} against ${sl.toFixed(0)} in the slices`);
+    assert.ok(cad > 3000 && pct(cad, sl) < 2, `${name}: wood removed ${cad.toFixed(0)} against ${sl.toFixed(0)} in the slices`);
   }
 });
 
-test('each smooth setting changes the cut the way its name says', () => {
+test('each contour setting changes the cut the way its name says', () => {
   const vol = (arm, belly) => { const d = bare(); if (arm) d.contours.arm = { ...d.contours.arm, on: true, ...arm }; if (belly) d.contours.belly = { ...d.contours.belly, on: true, ...belly }; return build(d).cad.volume; };
-  const flat = vol({});
-  assert.ok(vol({ blend: 60 }) < flat, 'rounding the crease takes a little more wood');
-  assert.ok(vol({ crown: 2 }) > flat, 'a curved cut leaves more wood than a flat one');
-  assert.ok(vol({ fade: 60 }) > flat, 'running out at the ends leaves more wood');
-  const bowl = vol(null, {});
-  assert.ok(vol(null, { blend: 60 }) < bowl, 'rounding the rim takes a little more wood');
+  const flat = vol({ roll: 0 });
+  assert.ok(vol({ roll: 1 }) > vol({ roll: 0.5 }) && vol({ roll: 0.5 }) > flat, 'the more the cut is rolled, the more wood it leaves');
+  assert.ok(vol({ roll: 0, blend: 60 }) < flat, 'rounding the crease takes a little more wood');
+  assert.ok(vol({ roll: 0, bounded: true }) > flat - 1, 'keeping the cut between its squares never takes more');
+  assert.ok(vol({ roll: 0, bounded: true, fade: 60 }) > vol({ roll: 0, bounded: true }), 'running out at the ends leaves more wood');
+  const sharp = vol(null, { blend: 0 });
+  assert.ok(vol(null, { blend: 60 }) < sharp, 'rounding the rim takes a little more wood');
 });
 
-test('the belly cut is a bowl: length parallel to the centerline, reach across, and older files convert', () => {
-  const d = defaultDesign();
-  assert.equal(d.contours.belly.angle, 0);
-  const dish = bellyDish({ ...d.contours.belly, on: true });
-  const xs = dish.ellipse(1, 360).map((p) => p.x), ys = dish.ellipse(1, 360).map((p) => p.y);
-  assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - d.contours.belly.len) < 0.01, 'its length runs along the centerline');
-  assert.ok(Math.abs(Math.max(...xs) - Math.min(...xs) - 2 * d.contours.belly.reach) < 0.01, 'its reach runs across');
-  assert.ok(Math.abs(dish.depth(d.contours.belly.x, d.contours.belly.y) - 14) < 1e-9, 'deepest at its center');
+test('the belly cut is a cone: straight slope from its center to its rim, length parallel to the centerline, and older files convert', () => {
+  const d = defaultDesign(), b = d.contours.belly;
+  assert.equal(b.angle, 0);
+  const cone = bellyDish({ ...b, on: true, blend: 0 });
+  const xs = cone.ellipse(1, 360).map((p) => p.x), ys = cone.ellipse(1, 360).map((p) => p.y);
+  assert.ok(Math.abs(Math.max(...ys) - Math.min(...ys) - b.len) < 0.01, 'its length runs along the centerline');
+  assert.ok(Math.abs(Math.max(...xs) - Math.min(...xs) - 2 * b.reach) < 0.01, 'its reach runs across');
+  assert.ok(Math.abs(cone.depth(b.x, b.y) - 14) < 1e-9, 'deepest at its center');
+  for (const f of [0.25, 0.5, 0.75]) {
+    assert.ok(Math.abs(cone.depth(b.x + b.reach * f, b.y) - 14 * (1 - f)) < 1e-9, 'a straight slope across');
+    assert.ok(Math.abs(cone.depth(b.x, b.y + (b.len / 2) * f) - 14 * (1 - f)) < 1e-9, 'a straight slope along');
+  }
   // an older file: deepest point and reach point 60 mm apart straight across, 160 long
   const old = { on: true, x1: -200, y1: 0, x2: -140, y2: 0, len: 160, drop: 12 };
   assert.deepEqual(bellyParams(old), { on: true, x: -200, y: 0, angle: 0, len: 160, reach: 60, drop: 12, blend: 0 });
-  const n = normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, contours: { belly: old } }).contours.belly;
-  assert.deepEqual([n.x, n.y, n.angle, n.len, n.reach, n.drop, n.x1], [-200, 0, 0, 160, 60, 12, undefined]);
-  // with a rim blend the cut starts a little outside the bare bowl's rim and is smooth there
-  const soft = bellyDish({ ...d.contours.belly, on: true, blend: 60 });
-  const rimX = d.contours.belly.x + d.contours.belly.reach;
-  assert.equal(dish.depth(rimX + 1, d.contours.belly.y), 0);
-  assert.ok(soft.depth(rimX + 1, d.contours.belly.y) > 0 && soft.depth(rimX + 40, d.contours.belly.y) === 0);
-  assert.ok(Math.abs(soft.depth(rimX - 30, d.contours.belly.y) - dish.depth(rimX - 30, d.contours.belly.y)) < 1e-9, 'unchanged away from the rim');
+  const n = normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, contours: { belly: old, arm: { on: true, x1: -164, y1: 30, x2: -70, y2: -150, drop: 12 } } }).contours;
+  assert.deepEqual([n.belly.x, n.belly.y, n.belly.angle, n.belly.len, n.belly.reach, n.belly.drop, n.belly.x1, n.belly.blend], [-200, 0, 0, 160, 60, 12, undefined, 0]);
+  assert.deepEqual([n.arm.roll, n.arm.crown, n.arm.bounded], [null, 0, true], 'an older arm bevel stays flat and between its squares');
+  // the short smooth transition: the cut starts a little outside the bare cone's rim and is unchanged away from it
+  assert.ok(b.blend > 0, 'a new belly cut starts with a rim blend');
+  const soft = bellyDish({ ...b, on: true }), rimX = b.x + b.reach;
+  assert.equal(cone.depth(rimX + 0.5, b.y), 0);
+  assert.ok(soft.depth(rimX + 0.5, b.y) > 0 && soft.depth(rimX + 30, b.y) === 0);
+  assert.ok(Math.abs(soft.depth(rimX - 30, b.y) - cone.depth(rimX - 30, b.y)) < 1e-9, 'unchanged away from the rim');
 });

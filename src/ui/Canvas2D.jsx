@@ -2,7 +2,7 @@ import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react'
 import { expandOutline, nodesToSvgPath, nearestOnNodes, insertNode, removeNode, setHandle, setKind } from '../core/path.js';
 import { fmtLen, unitLabel } from '../core/units.js';
 import { useSize } from './widgets.jsx';
-import { bellyDish } from '../model/solid.js';
+import { bellyDish, bevelPlane } from '../model/solid.js';
 
 const polyD = (p) => (p && p.length ? 'M' + p.map((q) => `${+q.x.toFixed(3)} ${+q.y.toFixed(3)}`).join('L') + 'Z' : '');
 const lineD = (p) => (p && p.length ? 'M' + p.map((q) => `${+q.x.toFixed(3)} ${+q.y.toFixed(3)}`).join('L') : '');
@@ -226,6 +226,8 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     return { dm, dM };
   }, [show.grid, view, size.w, size.h, units]);
 
+  // the arm bevel's line: right across the body, or between its squares when the cut is kept there
+  const armLine = useMemo(() => { const m = bevelPlane(design.contours.arm, g.outline, g.centroid); return m ? m.ends : null; }, [design.contours.arm, g.outline, g.centroid]);
   // where the belly cut's three squares sit: its middle, the end of its length, and its reach toward the body
   const bellyHandles = useMemo(() => {
     const b = design.contours.belly;
@@ -274,7 +276,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
           <path d={outlineD} stroke={editing ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing ? 1.8 : 1.6} {...NS} style={{ pointerEvents: 'none' }} />
           <path d={outlineD} stroke="transparent" strokeWidth="14" {...NS} data-k="outline" style={{ cursor: 'pointer' }} />
 
-          {design.contours.arm.on && <path d={`M${design.contours.arm.x1} ${design.contours.arm.y1}L${design.contours.arm.x2} ${design.contours.arm.y2}`} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="9 4" {...NS} />}
+          {armLine && <path d={`M${armLine[0].x} ${armLine[0].y}L${armLine[1].x} ${armLine[1].y}`} data-k="armline" stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="9 4" {...NS} clipPath="url(#bodyclip)" style={{ pointerEvents: 'none' }} />}
           {bellyEdge && <path d={polyD(bellyEdge)} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="2 5" {...NS} clipPath="url(#bodyclip)" />}
           {bellyEdge && bellyHandles && <path d={`M${bellyHandles.l.x} ${bellyHandles.l.y}L${bellyHandles.c.x} ${bellyHandles.c.y}L${bellyHandles.w.x} ${bellyHandles.w.y}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
 

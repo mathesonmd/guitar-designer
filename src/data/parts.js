@@ -36,5 +36,8 @@ export const CONTROL_NOTE = 'Hole sizes are starting values (3/8 in for pots and
 // channel has to be set to the strip in hand: its thickness is the channel's width, its height the depth.
 export const BINDING_START = { width: 1.5, depth: 6 };
 
+// Belly cut: the radius of the short smooth transition at its rim. A starting size only (basis: assumed).
+export const BELLY_BLEND_START = 25;
+
 export const DEFAULT_THICKNESS = 1.75 * IN; // 44.45 — the usual solid-body blank; set it to your blank
 export const WOOD_LEFT_UNDER_CONTROLS = 0.25 * IN; // Black Chapel T-style template routes controls 1.5 in deep in a 1.75 in body
