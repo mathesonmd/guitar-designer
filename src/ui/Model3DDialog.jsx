@@ -9,7 +9,7 @@ import { loadCadEngine } from './cadEngine.js';
 import { saveFile, slug, inViewer } from './files.js';
 import { fmtWithUnit } from '../core/units.js';
 import { edgeRounds } from '../model/design.js';
-import { bevelPlane, bellyDish } from '../model/solid.js';
+import { bevelPlane, bellyDish, buildLayers } from '../model/solid.js';
 import { Dialog, Check, Seg } from './widgets.jsx';
 
 const mm = (v) => `${+v.toFixed(2)} mm`;
@@ -44,7 +44,11 @@ export default function Model3DDialog({ design, onClose, toast }) {
       setBusy('Building the model…');
       await paint();
       let built;
-      try { built = buildBodySolid(cad.rc, cad.oc, design, g, { roundovers: roll, pockets: withPockets }); } catch (e) {
+      // the sliced solid of the very same body (same choices, no purfling channel) says what volume to expect
+      const same = { ...design, body: { ...design.body, roundTopOn: roll && design.body.roundTopOn !== false, roundBackOn: roll && design.body.roundBackOn !== false } };
+      // (holes with no depth entered are drilled a nominal depth in the 3D picture only, so they are left out here too)
+      const expectVolume = buildLayers(same, { ...g, purfling: null, cuts: withPockets ? g.cuts : [], holes: withPockets ? g.holes.filter((h) => h.side === 'through' || h.depth > 0) : [] }).volume;
+      try { built = buildBodySolid(cad.rc, cad.oc, design, g, { roundovers: roll, pockets: withPockets, expectVolume }); } catch (e) {
         throw new Error(e instanceof Error && e.message ? e.message : 'The 3D model could not be built from this design.');
       }
       const blob = kind === 'stl'
@@ -52,6 +56,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
         : new Blob([await toSTEP(cad.rc, built.shape, `${design.name} body`)], { type: 'model/step' });
       try { built.shape.delete(); } catch (e) { /* already released */ }
       const res = await saveFile(`${slug(design.name)}-body.${kind}`, blob);
+      if (res.ok && built.bevelStrips) res.message += ' The rolled edge bevel was built from 8 flat strips, within a few hundredths of a millimeter of the curve, because the engine could not cut the smooth version on this body.';
       setResult(res);
       toast(res.message);
     } catch (e) {

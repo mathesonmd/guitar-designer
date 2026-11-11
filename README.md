@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 68 geometry and export tests (Node, no browser)
+    npm test               # 69 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -112,9 +112,11 @@ Body contours, the same in both solids:
   the body edge. Every outline point has a width and a depth at the edge, its own (`bw`, `bd` on the
   node) or the bevel's general ones; a width of 0 tapers the bevel to nothing there. Between points both
   run in a smooth curve that never overshoots, and the inner line is a smooth curve through the moved
-  points. The surface is a stack of "sections" that pair up point for point, joined by straight lines:
-  two for a flat bevel, nine for a rolled one (8 strips within a few hundredths of a millimeter of the
-  curve). Both solids are built from those same sections. A width is held to the room the body has, and
+  points. The surface is defined by "sections" that pair up point for point. A flat bevel has two,
+  joined by straight lines. A rolled bevel follows a curve; the CAD solid runs one smooth surface through
+  nine sections of it and the sliced solid reads the same curve finely. A full roll leaves the top at a
+  tenth of the flat bevel's slope, not dead level, because the CAD engine cannot cut along a line where
+  two surfaces only touch. A width is held to the room the body has, and
   a depth to three times the width.
 - **Purfling channel.** A groove along the edge bevel's inner line. It is in the 3D picture and the CNC
   vectors only: cut along the bevel's crease, the CAD engine fails on some outlines, so it is left out of
@@ -126,6 +128,11 @@ Body contours, the same in both solids:
 The same CAD solid can also be saved as a binary STL for programs that do not read STEP (Vectric Aspire
 is one): a closed mesh whose flat facets stay within 0.02 mm of the true surface. STL records no units;
 the numbers are millimeters.
+
+**The saved model is checked.** OpenCascade can return a wrong solid with no error. Before a file is
+saved, its volume is compared with the sliced solid of the same body. If a rolled edge bevel is the
+cause, the bevel is rebuilt from flat strips and the dialog says so; if the volumes still differ by more
+than 0.3%, the save is refused.
 
 Known limits of both files, all stated in the save dialog:
 

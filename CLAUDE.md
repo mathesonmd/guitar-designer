@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 68 geometry and export tests (27 of them build the CAD solid)
+    npm test                  # 69 geometry and export tests (28 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 33 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -74,6 +74,10 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   agree to about 0.002%. The owner's first sample had a wavy inner line: the line must be a smooth curve
   through the moved points (never the outline's own handles carried across), and widths must blend
   smoothly between points. `test/step.test.mjs` checks for kinks and for wobble.
+- Never save a CAD solid unchecked. `buildBodySolid` takes `expectVolume` (the sliced solid's volume for
+  the same body) and refuses, or falls back, when they disagree. OpenCascade has silently returned wrong
+  solids three times so far: overlapping pocket cutters, a purfling channel on the bevel's crease, and a
+  fully rolled bevel that only touched the top face. Avoid cuts where two surfaces merely touch.
 - Do not cut the purfling channel in the CAD solid along the bevel's crease: OpenCascade returned flawed
   solids, wrong volumes and a crash on some outlines, and took about 20 seconds when it worked. The 3D
   view derives the body with a coarser outline (tol 0.1) than the files do: anything that measures

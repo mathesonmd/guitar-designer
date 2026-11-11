@@ -10,9 +10,10 @@
 //     The last section lies a little outside the body, so the cut always passes cleanly through the
 //     body edge. The body edge itself is a fraction of the way along, different at every point.
 //   - Straight lines join each point of one section to the matching point of the next.
-//   - A flat bevel needs only the two end sections. A rolled bevel has ROLL_STRIPS strips between them,
-//     their heights taken from a curve that leaves the top level and steepens toward the edge; the strips
-//     stay within a few hundredths of a millimeter of that curve.
+//   - A flat bevel needs only the two end sections, joined by straight lines.
+//   - A rolled bevel follows a curve that leaves the top level and steepens toward the edge. The CAD solid
+//     runs one smooth surface through ROLL_SECTIONS + 1 sections taken from that curve. The sliced solid
+//     reads the same curve at FINE_STEPS steps. Both sit within a few thousandths of a millimeter of it.
 import { expandOutline, insetNodes, inwardNormals, insertNode, segmentsOf } from '../core/path.js';
 import { cubicAt } from '../core/bezier.js';
 import { EdgeIndex } from '../core/edgeindex.js';
@@ -20,7 +21,11 @@ import { pointInPoly, signedArea } from '../core/poly.js';
 import { toRegion } from '../core/clip.js';
 import { edgeBevel } from './design.js';
 
-export const ROLL_STRIPS = 8;
+export const ROLL_SECTIONS = 8;
+const FINE_STEPS = 48;
+// A bevel rolled 100% leaves the top at this fraction of the flat bevel's slope, not dead level. Dead level,
+// the bevel would only touch the top along its inner line, and the CAD engine cannot cut along a touching line.
+export const LEAST_SLOPE = 0.1;
 const PAST_EDGE = 4;    // how far outside the body the last section lies
 const STEEPEST = 3;     // the depth at a point is held to this many times its width there
 
@@ -99,13 +104,15 @@ export function buildEdgeBevel(design, outline, tol = 0.02) {
   // a bevel may not be steeper than STEEPEST to 1, so where it narrows to nothing its depth goes to nothing too
   const askedDepth = outer.map((p) => p.deep);
   const depths = askedDepth.map((d, i) => Math.min(d, STEEPEST * widths[i]));
-  const roll = eb.roll;
+  const roll = eb.roll * (1 - LEAST_SLOPE); // how much of the curve is used: see LEAST_SLOPE
 
   const inner = insetNodes(outer, widths);
   const beyond = insetNodes(outer, outer.map(() => -PAST_EDGE)); // the last section, outside the body
   // sections: fraction lam of the way from the inner line (0) to the last section (1)
-  const strips = roll > 1e-6 ? ROLL_STRIPS : 1;
+  const rolled = roll > 1e-6, strips = rolled ? ROLL_SECTIONS : 1;
   const lams = Array.from({ length: strips + 1 }, (_, k) => k / strips);
+  // the sliced solid reads the curve more finely than the CAD solid's sections
+  const fine = rolled ? FINE_STEPS : 1, fineLams = Array.from({ length: fine + 1 }, (_, k) => k / fine);
   // height of the surface above the back, at outline point i, a fraction lam of the way out
   const heightAt = (i, lam) => {
     const w = widths[i];
@@ -113,6 +120,7 @@ export function buildEdgeBevel(design, outline, tol = 0.02) {
     return T - depths[i] * bevelShape((lam * (w + PAST_EDGE)) / w, roll);
   };
   const height = lams.map((lam) => outer.map((_, i) => heightAt(i, lam))); // height[k][i]
+  const fineHeight = fineLams.map((lam) => outer.map((_, i) => heightAt(i, lam)));
   // each section as a chain of nodes (x, y and handles), and its height at each node
   const mix = (k) => inner.map((p, i) => {
     const q = beyond[i], f = lams[k];
@@ -127,7 +135,7 @@ export function buildEdgeBevel(design, outline, tol = 0.02) {
     const j = (i + 1) % n, N = Math.max(6, Math.min(60, Math.ceil(Math.hypot(seg.p3.x - seg.p0.x, seg.p3.y - seg.p0.y) / 2.5)));
     for (let m = 0; m < N; m++) {
       const t = m / N;
-      samples.push({ a: cubicAt(si[i].p0, si[i].p1, si[i].p2, si[i].p3, t), b: cubicAt(sb[i].p0, sb[i].p1, sb[i].p2, sb[i].p3, t), z: height.map((h) => h[i] + (h[j] - h[i]) * t) });
+      samples.push({ a: cubicAt(si[i].p0, si[i].p1, si[i].p2, si[i].p3, t), b: cubicAt(sb[i].p0, sb[i].p1, sb[i].p2, sb[i].p3, t), z: fineHeight.map((h) => h[i] + (h[j] - h[i]) * t) });
     }
   });
   // The outline of the bevelled body at height z: for each sample, where the surface is at that height.
@@ -135,8 +143,8 @@ export function buildEdgeBevel(design, outline, tol = 0.02) {
   const shapeAt = (z) => samples.map((s) => {
     let lam = 1;
     if (z >= s.z[0]) lam = 0;
-    else for (let k = 0; k < strips; k++) {
-      if (z >= s.z[k + 1]) { lam = lams[k] + ((s.z[k] - z) / (s.z[k] - s.z[k + 1])) * (lams[k + 1] - lams[k]); break; }
+    else for (let k = 0; k < fine; k++) {
+      if (z >= s.z[k + 1]) { lam = fineLams[k] + ((s.z[k] - z) / (s.z[k] - s.z[k + 1])) * (fineLams[k + 1] - fineLams[k]); break; }
     }
     return { x: s.a.x + (s.b.x - s.a.x) * lam, y: s.a.y + (s.b.y - s.a.y) * lam };
   });
@@ -147,7 +155,7 @@ export function buildEdgeBevel(design, outline, tol = 0.02) {
   const handles = outer.map((p, j) => ({ i: p.from, outer: { x: p.x, y: p.y }, inner: { x: inner[j].x, y: inner[j].y }, normal: normals[j], width: widths[j], asked: asked[j], depth: depths[j], askedDepth: askedDepth[j] })).filter((h) => h.i >= 0);
   const deepest = Math.max(0, ...depths);
   return {
-    width: eb.width, drop: eb.drop, roll, strips, outer, inner, sections, widths, depths, asked, askedDepth,
+    width: eb.width, drop: eb.drop, roll: eb.roll, rolled, strips, outer, inner, sections, widths, depths, asked, askedDepth,
     shapeAt, innerPoly, crosses, handles, deepest,
     lowest: Math.min(T, ...height[strips]), // the lowest the surface gets, out at the last section
   };

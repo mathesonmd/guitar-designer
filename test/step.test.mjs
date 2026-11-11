@@ -425,7 +425,8 @@ test('edge bevel: a rolled profile leaves the top level and takes less wood; eve
     assert.ok(removed[name] > 5000, `${name}: takes a real amount of wood`);
   }
   assert.ok(removed['rolled 100%'] < removed['rolled 50%'] && removed['rolled 50%'] < removed.flat, 'the more it is rolled, the more wood it leaves');
-  assert.ok(Math.abs(removed['rolled 100%'] / removed.flat - 2 / 3) < 0.02, 'a full roll takes two thirds of what the flat bevel takes');
+  // a full roll uses nine tenths of the curve (it leaves the top at a tenth of the flat slope), which takes 0.7 of the flat bevel's wood
+  assert.ok(Math.abs(removed['rolled 100%'] / removed.flat - 0.7) < 0.02, `a full roll takes ${(removed['rolled 100%'] / removed.flat).toFixed(3)} of what the flat bevel takes`);
 });
 
 test('purfling channel: a groove of its width and depth along the inner line, in the 3D picture but not in the CAD solid', () => {
@@ -438,4 +439,21 @@ test('purfling channel: a groove of its width and depth along the inner line, in
   assert.ok(groove / (length * 2 * 3) > 0.88 && groove / (length * 2 * 3) < 1.01, `groove volume ${groove.toFixed(0)} against about ${(length * 6).toFixed(0)}`);
   assert.ok(Math.abs(r.cad.volume - without.cad.volume) < 1, 'the CAD solid leaves the channel out (the save dialog says so)');
   assert.equal(derive(bare()).purfling, null, 'no purfling without the bevel');
+});
+
+test('the saved model is checked against the sliced solid: a wrong solid is never returned', () => {
+  // the J-style outline with a wide, fully rolled bevel: the engine cuts the smooth surface wrongly and reports no error
+  const d = bare(); d.outline = JSON.parse(JSON.stringify(STARTERS.jstyle.outline)); d.body.edgeBevel = { ...d.body.edgeBevel, on: true, roll: 1, width: 30 };
+  const g = derive(d, { tol: 0.005 }), expectVolume = buildLayers(d, g).volume;
+  const unchecked = buildBodySolid(rc, oc, d, g);
+  assert.ok(pct(unchecked.volume, expectVolume) > 1, 'without the check, the engine hands back a solid that is the wrong size');
+  const checked = buildBodySolid(rc, oc, d, g, { expectVolume });
+  assert.equal(checked.bevelStrips, true, 'with it, the bevel is rebuilt from flat strips');
+  assert.ok(pct(checked.volume, expectVolume) < 0.05, `and matches within ${pct(checked.volume, expectVolume).toFixed(4)}%`);
+  // a body the engine handles is returned as it is, with a smooth bevel
+  const easy = bare(); easy.body.edgeBevel = { ...easy.body.edgeBevel, on: true, roll: 1 };
+  const ge = derive(easy, { tol: 0.005 });
+  assert.equal(buildBodySolid(rc, oc, easy, ge, { expectVolume: buildLayers(easy, ge).volume }).bevelStrips, undefined);
+  // and when nothing makes the volumes agree, the save is refused in plain words
+  assert.throws(() => buildBodySolid(rc, oc, easy, ge, { expectVolume: buildLayers(easy, ge).volume * 1.05 }), /did not come out the same size as the body in the 3D view, so it was not saved/);
 });

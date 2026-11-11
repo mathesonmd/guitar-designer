@@ -9,7 +9,7 @@ import { edgeRounds } from './design.js';
 const ROUND_STEPS = 8;
 const BEVEL_STEP = 1.0;
 const DISH_STEP = 0.75;
-const EDGE_STEPS = 16;
+const EDGE_STEPS = 32;
 
 // ---------------------------------------------------------------------------------------------
 // Arm bevel. A cut that starts at a line drawn on the top and deepens toward the body edge. It is the
@@ -301,10 +301,15 @@ export function buildLayers(design, g) {
     // bevel around the top edge: at this height the body is the shape partway from the outline to the inner line
     // (where the bevel is shallower than this height the shape lies outside the body, and the body is left whole)
     if (edge && edge.deepest > 0 && zm > T - edge.deepest) {
-      const pts = edge.shapeAt(zm), lower = edge.shapeAt(z0), upper = edge.shapeAt(z1);
+      const pts = edge.shapeAt(zm), h = (z1 - z0) / 2;
       region = intersect(region, toRegion([pts]));
-      // for shading: how far the bevel's edge moves in across this slice, and which way, at each point
-      tag.edge = { pts, dz: z1 - z0, run: pts.map((_, i) => Math.hypot(lower[i].x - upper[i].x, lower[i].y - upper[i].y)), out: pts.map((_, i) => ({ x: lower[i].x - upper[i].x, y: lower[i].y - upper[i].y })) };
+      // For shading: how steeply the bevel leans at the bottom of this slice and at its top, measured over
+      // the same height each time, so neighboring slices agree where they meet and the shading runs smoothly.
+      const lean = (z) => {
+        const lower = edge.shapeAt(z - h), upper = edge.shapeAt(z + h);
+        return { run: pts.map((_, i) => Math.hypot(lower[i].x - upper[i].x, lower[i].y - upper[i].y)), out: pts.map((_, i) => ({ x: lower[i].x - upper[i].x, y: lower[i].y - upper[i].y })) };
+      };
+      tag.edge = { pts, dz: 2 * h, low: lean(z0), high: lean(z1) };
     }
     // purfling channel: a narrow groove just inside the bevel's inner line
     if (purfRing && zm > T - purf.depth) region = difference(region, purfRing);

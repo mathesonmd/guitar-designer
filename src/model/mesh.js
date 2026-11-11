@@ -42,8 +42,8 @@ export function buildBodyMesh(solid, outline) {
             A0 = A1 = arm.normal(a.x, a.y); B0 = B1 = arm.normal(b.x, b.y); done = true;
           } else if (tag.dish && Math.abs(dish.depth(a.x, a.y) - tag.dish.z) < ON && Math.abs(dish.depth(b.x, b.y) - tag.dish.z) < ON) {
             A0 = A1 = dish.normal(a.x, a.y); B0 = B1 = dish.normal(b.x, b.y); done = true;
-          } else if (tag.edge && edgeNormal(a, tag.edge) && edgeNormal(b, tag.edge)) {
-            A0 = A1 = edgeNormal(a, tag.edge); B0 = B1 = edgeNormal(b, tag.edge); done = true;
+          } else if (tag.edge && edgeNormal(a, tag.edge, 'low') && edgeNormal(b, tag.edge, 'low') && edgeNormal(a, tag.edge, 'high') && edgeNormal(b, tag.edge, 'high')) {
+            A0 = edgeNormal(a, tag.edge, 'low'); B0 = edgeNormal(b, tag.edge, 'low'); A1 = edgeNormal(a, tag.edge, 'high'); B1 = edgeNormal(b, tag.edge, 'high'); done = true;
           } else if (tag.round && Math.abs(idx.nearest(mid.x, mid.y).d - tag.round.inset) < 0.06) {
             const r = tag.round;
             const c0 = Math.cos(r.th0), s0 = Math.sin(r.th0) * r.dir, c1 = Math.cos(r.th1), s1 = Math.sin(r.th1) * r.dir;
@@ -90,20 +90,21 @@ export function buildBodyMesh(solid, outline) {
 
   // Shading normal for a point on a horizontal step. Steps that belong to a roundover or bevel take
   // that surface's normal; true flats (top, back, cavity floors) face straight up or down.
-  // Shading normal on the bevel around the top edge: across one slice the bevel's edge moves in by `run`
-  // while it rises by `dz`, so the surface there leans by that much. Null when the point is not on the bevel.
-  function edgeNormal(p, e, reach = 0.05) {
+  // Shading normal on the bevel around the top edge. `side` is the slice's bottom ('low') or top ('high'):
+  // there the bevel's edge moves in by `run` while it rises by `dz`, so the surface leans by that much.
+  // Null when the point is not on the bevel.
+  function edgeNormal(p, e, side, reach = 0.05) {
     if (!e.index) e.index = new EdgeIndex(e.pts, 12);
     const q = e.index.nearest(p.x, p.y);
     if (q.i < 0) return null;
-    const run = e.run[q.i], o = e.out[q.i];
+    const run = e[side].run[q.i], o = e[side].out[q.i];
     if (!(run > 1e-4) || q.d > reach + (reach > 0.05 ? run : 0)) return null;
     const l = Math.hypot(e.dz, run);
     return [(o.x / run) * (e.dz / l), (o.y / run) * (e.dz / l), run / l];
   }
 
   function capNormal(p, dir, ntag) {
-    if (dir > 0 && ntag.edge && !(ntag.arm && arm.depth(p.x, p.y) > ntag.arm.dz - ON)) { const n = edgeNormal(p, ntag.edge, 0.3); if (n) return n; }
+    if (dir > 0 && ntag.edge && !(ntag.arm && arm.depth(p.x, p.y) > ntag.arm.dz - ON)) { const n = edgeNormal(p, ntag.edge, 'low', 0.3); if (n) return n; }
     if (dir > 0 && ntag.arm && arm.depth(p.x, p.y) > ntag.arm.dz - ON) return arm.normal(p.x, p.y);
     if (dir < 0 && ntag.dish && dish.depth(p.x, p.y) > ntag.dish.z - ON) return dish.normal(p.x, p.y);
     if (ntag.round && ntag.round.dir === dir) {

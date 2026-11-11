@@ -148,6 +148,26 @@ function cutAll(rc, oc, body, tools) {
   return out;
 }
 
+// The body as a CAD solid. `expectVolume` is the volume the sliced solid gives for the same body: the
+// engine can return a wrong solid with no error at all, and comparing volumes is how that is caught.
+//   - If a rolled edge bevel is the cause, the bevel is rebuilt from flat strips (`bevelStrips` in the
+//     result says so; the strips stay within a few hundredths of a millimeter of the curve).
+//   - If the volumes still disagree, nothing is returned: an Error with a plain message is thrown.
+export function buildBodySolid(rc, oc, design, g, opts = {}) {
+  const { expectVolume } = opts;
+  const agrees = (r) => !(expectVolume > 0) || Math.abs(r.volume / expectVolume - 1) < 0.003;
+  let first = null, why = null;
+  try { first = buildOnce(rc, oc, design, g, opts); } catch (err) { why = err; }
+  if (first && agrees(first)) return first;
+  if (g.bevelEdge && g.bevelEdge.rolled) {
+    let second = null;
+    try { second = buildOnce(rc, oc, design, g, { ...opts, smoothBevel: false }); } catch (err) { if (!why) why = err; }
+    if (second && agrees(second)) return { ...second, bevelStrips: true };
+  }
+  if (why && !first) throw why;
+  throw new Error('The 3D model did not come out the same size as the body in the 3D view, so it was not saved. Something in this design is more than the 3D engine can cut cleanly: try a smaller roundover, a narrower or less rolled edge bevel, or a smaller blend.');
+}
+
 // Round holes that will not be in the solid, as [{ what, count }]. Known before anything is built.
 export function holesLeftOut(g) {
   const skipped = new Map();
@@ -163,7 +183,7 @@ export function holesLeftOut(g) {
 // `roundovers: false` leaves the body edges square (for rounding over by hand after the body is cut).
 // `pockets: false` leaves every pocket and hole out (for cutting them from the 2D CNC vectors instead).
 // Throws an Error with a plain-language message when a part of the body cannot be built.
-export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets = true } = {}) {
+function buildOnce(rc, oc, design, g, { roundovers = true, pockets = true, smoothBevel = true } = {}) {
   const T = design.body.thickness;
   const rounds = edgeRounds(design);
   const rT = roundovers ? rounds.top : 0, rB = roundovers ? rounds.back : 0;
@@ -212,11 +232,28 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
       return rc.assembleWire(edges);
     };
     const last = e.sections[e.sections.length - 1], first = e.sections[0];
-    const wires = [wire(last.nodes, () => zLow)];
-    for (let k = e.sections.length - 1; k >= 0; k--) wires.push(wire(e.sections[k].nodes, (i) => e.sections[k].z[i]));
-    wires.push(wire(first.nodes, () => T + 2 * PAST));
+    const foot = wire(last.nodes, () => zLow), rim = wire(last.nodes, (i) => last.z[i]), line = wire(first.nodes, (i) => first.z[i]), head = wire(first.nodes, () => T + 2 * PAST);
     let keep;
-    try { keep = rc.loft(wires, { ruled: true }); } catch (err) {
+    try {
+      if (!e.rolled) keep = rc.loft([foot, rim, line, head], { ruled: true });
+      else if (!smoothBevel) {
+        // the fallback: straight lines from each section to the next, which the engine always manages
+        const all = [foot, rim];
+        for (let k = e.sections.length - 2; k >= 1; k--) all.push(wire(e.sections[k].nodes, (i) => e.sections[k].z[i]));
+        keep = rc.loft([...all, line, head], { ruled: true });
+      }
+      else {
+        // a rolled bevel is one smooth surface through all its sections; the walls below and above it are
+        // straight, and the whole skin is closed with a flat face at the bottom and at the top
+        const through = [rim];
+        for (let k = e.sections.length - 2; k >= 1; k--) through.push(wire(e.sections[k].nodes, (i) => e.sections[k].z[i]));
+        through.push(line);
+        keep = rc.makeSolid([rc.makeFace(foot), rc.loft([foot, rim], { ruled: true }, true), rc.loft(through, { ruled: false }, true), rc.loft([line, head], { ruled: true }, true), rc.makeFace(head)]);
+        // a skin sewn from separate faces can come out facing inward: turn it the right way out
+        oc.BRepLib.OrientClosedSolid(keep.wrapped);
+        if (!(rc.measureVolume(keep) > 0)) throw new Error('inside out');
+      }
+    } catch (err) {
       throw new Error('The bevel around the top edge could not be built. Make it narrower where the outline turns tightly, then try again.');
     }
     tools.push(prism(rc.drawRoundedRectangle(b.w + 2 * m, b.h + 2 * m).translate(b.x0 + b.w / 2, b.y0 + b.h / 2), zLow + 1, T + PAST).cut(keep));
