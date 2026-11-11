@@ -8,7 +8,7 @@ export const node = (x, y, ix = 0, iy = 0, ox = 0, oy = 0, k = 's') => ({ x, y, 
 export const cloneNodes = (nodes) => nodes.map((n) => ({ ...n }));
 
 // Mirror a node across the centerline (x = 0); in and out handles swap because direction reverses.
-const mirrorNode = (n) => ({ x: -n.x, y: n.y, ix: -n.ox, iy: n.oy, ox: -n.ix, oy: n.iy, k: n.k, ...(n.bw !== undefined ? { bw: n.bw } : {}) });
+const mirrorNode = (n) => ({ x: -n.x, y: n.y, ix: -n.ox, iy: n.oy, ox: -n.ix, oy: n.iy, k: n.k, ...(n.bw !== undefined ? { bw: n.bw } : {}), ...(n.bd !== undefined ? { bd: n.bd } : {}) });
 
 // outline = { symmetric, nodes }. When symmetric, `nodes` holds the left half only, running from the
 // top centerline node to the bottom centerline node; the right half is generated.
@@ -250,12 +250,23 @@ export function inwardNormals(nodes) {
 // own width (widths[i]). Returns a chain with the same number of nodes in the same order, so segment i
 // of the outline pairs with segment i of the inner line. Handles are scaled by how much shorter or
 // longer each inner segment is than its outer one.
+// Away from corners the new line gets its own smooth curve through the moved points (each handle follows
+// the line from the point before to the point after), so it does not kink where the width changes.
 export function insetNodes(nodes, widths) {
   const n = nodes.length, nrm = inwardNormals(nodes);
-  const moved = nodes.map((p, i) => { const w = Math.max(0, widths[i]); return { x: p.x + nrm[i].x * w, y: p.y + nrm[i].y * w }; });
+  // (a negative width moves a point outward)
+  const moved = nodes.map((p, i) => ({ x: p.x + nrm[i].x * widths[i], y: p.y + nrm[i].y * widths[i] }));
   const ratio = (i, j) => { const outer = Math.hypot(nodes[j].x - nodes[i].x, nodes[j].y - nodes[i].y); return outer > 1e-9 ? Math.hypot(moved[j].x - moved[i].x, moved[j].y - moved[i].y) / outer : 1; };
   return nodes.map((p, i) => {
+    const a = moved[(i - 1 + n) % n], b = moved[(i + 1) % n], c = moved[i];
+    const tx = b.x - a.x, ty = b.y - a.y, tl = Math.hypot(tx, ty);
+    if (nrm[i].open > 0.985 && tl > 1e-9) {
+      // a smooth point: both handles lie along the line from the point before to the point after
+      const lin = Math.hypot(c.x - a.x, c.y - a.y) / 3, lout = Math.hypot(b.x - c.x, b.y - c.y) / 3;
+      return { x: c.x, y: c.y, ix: (-tx / tl) * lin, iy: (-ty / tl) * lin, ox: (tx / tl) * lout, oy: (ty / tl) * lout, k: p.k };
+    }
+    // a corner keeps the directions it had, scaled to the new segment lengths
     const rin = ratio((i - 1 + n) % n, i), rout = ratio(i, (i + 1) % n);
-    return { x: moved[i].x, y: moved[i].y, ix: p.ix * rin, iy: p.iy * rin, ox: p.ox * rout, oy: p.oy * rout, k: p.k };
+    return { x: c.x, y: c.y, ix: p.ix * rin, iy: p.iy * rin, ox: p.ox * rout, oy: p.oy * rout, k: p.k };
   });
 }

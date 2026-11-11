@@ -38,6 +38,8 @@ export const BINDING_START = { width: 1.5, depth: 6 };
 
 // Bevel around the top edge: a starting width and depth only (basis: assumed). It is shaped by eye.
 export const EDGE_BEVEL_START = { width: 15, drop: 6 };
+// Purfling channel along the bevel's inner line: a starting size only (basis: assumed). Set it to the strip in hand.
+export const PURFLING_START = { width: 1.5, depth: 2 };
 
 // Belly cut: the radius of the short smooth transition at its rim. A starting size only (basis: assumed).
 export const BELLY_BLEND_START = 25;

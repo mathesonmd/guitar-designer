@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 63 geometry and export tests (Node, no browser)
+    npm test               # 68 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -108,11 +108,17 @@ Body contours, the same in both solids:
   blended to a radius). The line runs right across the body. As an option the cut can be kept between
   its two squares, with a run-out that lifts it in a parabola at each end. The CAD solid draws the same
   cross-section with true lines and arcs.
-- **Bevel around the top edge.** A flat bevel from an inner line on the top down to a set depth at the
-  body edge. The inner line is the outline moved in by a width that each outline point can have for
-  itself (`bw` on the node; drag its diamond on the drawing). Straight lines join each point of the
-  outline to the matching point of the inner line, in both solids. A width is held to the room the body
-  has at that point, so the inner line cannot cross over at a horn tip, a corner or a tight curve.
+- **Bevel around the top edge** (`src/model/edgebevel.js`). A bevel from an inner line on the top down to
+  the body edge. Every outline point has a width and a depth at the edge, its own (`bw`, `bd` on the
+  node) or the bevel's general ones; a width of 0 tapers the bevel to nothing there. Between points both
+  run in a smooth curve that never overshoots, and the inner line is a smooth curve through the moved
+  points. The surface is a stack of "sections" that pair up point for point, joined by straight lines:
+  two for a flat bevel, nine for a rolled one (8 strips within a few hundredths of a millimeter of the
+  curve). Both solids are built from those same sections. A width is held to the room the body has, and
+  a depth to three times the width.
+- **Purfling channel.** A groove along the edge bevel's inner line. It is in the 3D picture and the CNC
+  vectors only: cut along the bevel's crease, the CAD engine fails on some outlines, so it is left out of
+  the STEP and STL and the save dialog says so.
 - **Belly cut.** A wide, short cone, depth = drop x (1 - rho), set by a center, a length (parallel to the
   centerline unless turned), a reach and a depth, with a short blend at its rim. The rim blend is a true
   rolled radius in the CAD solid; the sliced solid works it out approximately, and the screen says so.

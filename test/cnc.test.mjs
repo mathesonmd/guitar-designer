@@ -130,9 +130,10 @@ test('the binding channel\'s inner edge is the outline moved in by the channel w
 });
 
 test('the edge bevel\'s inner line is on its own layer, named with the depth at the body edge', () => {
-  const d = defaultDesign(); d.body.edgeBevel = { on: true, width: 15, drop: 6 };
+  const d = defaultDesign(); d.body.edgeBevel = { ...d.body.edgeBevel, on: true, width: 15, drop: 6, purfling: true };
   const { g, v } = make(d);
-  const line = on(v.files[0], /^TOP_EDGE_BEVEL_INNER_LINE_6\.00MM_DEEP_AT_THE_BODY_EDGE$/);
+  const line = on(v.files[0], /^TOP_EDGE_BEVEL_INNER_LINE_UP_TO_6\.00MM_DEEP_AT_THE_BODY_EDGE$/);
+  assert.equal(on(v.files[0], /^TOP_PURFLING_CHANNEL_1\.50MM_WIDE_2\.00MM_DEEP$/).length, 2, 'the purfling channel\'s two edges share a layer');
   assert.equal(line.length, 1);
   const b = box(line[0]);
   assert.ok(b.x0 > g.bbox.x0 + 5 && b.x1 < g.bbox.x1 - 5 && b.y0 > g.bbox.y0 + 5, 'inside the outline');

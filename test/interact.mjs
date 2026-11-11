@@ -602,7 +602,7 @@ await step('the belly cut is sized with three squares, and the arm bevel can be 
   return `length ${b0.len.toFixed(0)} → ${b1.len.toFixed(0)} mm, reach ${b1.reach.toFixed(0)} → ${b2.reach.toFixed(0)} mm, turned ${(b4.angle * 180 / Math.PI).toFixed(0)}° then undone; smooth STEP ${(fs.statSync(smooth).size / 1024).toFixed(0)} KB`;
 });
 
-await step('a bevel around the top edge is shaped by dragging a diamond at each outline point', async () => {
+await step('a bevel around the top edge: drag a diamond for width, give a point its own depth, taper to nothing, roll it, add purfling', async () => {
   await tab('Design'); await settle(400); await openSec('body');
   const n0 = (await state()).outline;
   await page.locator('section[data-sec="body"] label.check:has-text("Bevel around the top edge") input').check();
@@ -611,7 +611,7 @@ await step('a bevel around the top edge is shaped by dragging a diamond at each 
   const count = await page.locator('.stage [data-k="edgebevel"]').count();
   assert(count === (n0.symmetric ? 2 * (n0.nodes.length - 1) : n0.nodes.length), `one diamond for each point of the outline (${count})`);
   assert(await page.locator('.stage [data-k="edgeline"]').count() === 1, 'the inner line is drawn');
-  assert(/top roundover and the binding channel are left out/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says what the bevel replaces');
+  assert(/binding channel is left out while this bevel is on/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says what the bevel replaces');
   // drag the diamond of the lowest outline point 20 mm farther into the body
   const nodes = n0.nodes, low = nodes.reduce((b, q, k) => (q.y < nodes[b].y ? k : b), 0);
   const bb = await page.locator(`.stage [data-k="edgebevel"][data-i="${low}"]`).boundingBox();
@@ -622,21 +622,38 @@ await step('a bevel around the top edge is shaped by dragging a diamond at each 
   const s1 = await state();
   near(s1.outline.nodes[low].bw, 35, 1.5, 'that point is now 15 + 20 mm wide');
   assert(s1.outline.nodes.filter((q) => q.bw !== undefined).length === 1, 'only that point was changed');
+  // the picked diamond's own width and depth can be typed, and a width of 0 tapers the bevel to nothing there
+  assert(await page.locator(`.stage [data-k="edgebevel"][data-picked="1"]`).count() === 1, 'the dragged diamond is picked');
+  await setField('#eb-pt-d', '10 mm');
+  const other = (low + 3) % nodes.length;
+  await page.locator(`.stage [data-k="edgebevel"][data-i="${other}"]`).click();
+  await setField('#eb-pt-w', '0');
+  const s1b = await state();
+  assert(Math.abs(s1b.outline.nodes[low].bd - 10) < 1e-6 && s1b.outline.nodes[other].bw === 0, 'depth at one point and zero width at another are stored');
+  await setField('#eb-roll', '100');
+  await page.locator('section[data-sec="body"] label.check:has-text("Purfling channel along the inner line") input').check();
+  await settle(500);
+  assert(await page.locator('.stage [data-k="purfling"]').count() >= 1, 'the purfling channel\'s second line is drawn');
+  assert(/not in the saved 3D model/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the channel is not in the 3D model');
   await tab('3D'); await settle(1500);
   await page.locator('.viewopts label.check input').uncheck(); await settle(500);
   await page.screenshot({ path: path.join(out, '3d-edge-bevel.png') });
   await page.locator('.viewopts label.check input').check();
   await page.click('.viewopts button:has-text("Save files for CNC")');
   const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
-  assert(/bevel around the top edge, 6 mm/i.test(await dlg.innerText()), 'the dialog lists the edge bevel');
+  const eSaid = await dlg.innerText();
+  assert(/bevel around the top edge, rolled 100%/i.test(eSaid) && /tapering to nothing/i.test(eSaid), 'the dialog describes the edge bevel');
+  assert(/purfling channel\. It cannot yet be cut reliably into the 3D model/i.test(eSaid), 'the dialog says the purfling channel is not in the 3D file');
   files.stepEdge = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
   const edge = files.stepEdge.replace('.step', '-smooth-edge.step'); fs.renameSync(files.stepEdge, edge); files.stepEdge = edge;
   assert(fs.readFileSync(edge, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file with the edge bevel saved');
   await page.keyboard.press('Escape');
   await tab('Design'); await openSec('body');
-  await page.locator('section[data-sec="body"] button:has-text("Set every point to this width")').click();
+  await page.locator('section[data-sec="body"] button:has-text("Set every point to the general sizes")').click();
   const s2 = await state();
-  assert(s2.outline.nodes.every((q) => q.bw === undefined), 'every point is back to the general width');
+  assert(s2.outline.nodes.every((q) => q.bw === undefined && q.bd === undefined), 'every point is back to the general sizes');
+  await setField('#eb-roll', '0');
+  await page.locator('section[data-sec="body"] label.check:has-text("Purfling channel along the inner line") input').uncheck();
   await page.locator('section[data-sec="body"] label.check:has-text("Bevel around the top edge") input').uncheck();
   return `${count} diamonds; one dragged to ${s1.outline.nodes[low].bw.toFixed(1)} mm; STEP ${(fs.statSync(edge).size / 1024).toFixed(0)} KB`;
 });

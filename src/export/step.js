@@ -195,21 +195,32 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
   const dish = bellyDish(design.contours.belly, T - 3);
   if (dish) tools.push(bellyCone(rc, oc, dish));
 
-  // bevel around the top edge: everything outside the ruled surface that runs from the outline, at the
-  // bevel's depth, up to the inner line at the top (and on straight up above the top)
-  if (g.bevelEdge) {
-    const e = g.bevelEdge, b = g.bbox, m = 20, z0 = T - e.drop;
+  // bevel around the top edge: everything above its surface. The surface is the bevel's own sections
+  // (model/edgebevel.js) joined by straight lines; below the last section, which lies outside the body, it
+  // drops straight down, and above the inner line it rises straight up.
+  if (g.bevelEdge && g.bevelEdge.deepest > 0) {
+    const e = g.bevelEdge, b = g.bbox, m = 20, zLow = e.lowest - 2;
     if (e.crosses) throw new Error('The inner line of the bevel around the top edge crosses itself. Make the bevel narrower where the outline turns tightly, then try again.');
-    const back = signedArea(e.outer.map((p) => ({ x: p.x, y: p.y }))) < 0;
+    // a closed curve through the section's nodes, each at its own height (heights run evenly between nodes)
+    const wire = (nodes, zOf) => {
+      const edges = [], count = nodes.length;
+      for (let i = 0; i < count; i++) {
+        const p = nodes[i], q = nodes[(i + 1) % count], z0 = zOf(i), z1 = zOf((i + 1) % count);
+        if (Math.hypot(q.x - p.x, q.y - p.y) < EPS && Math.hypot(p.ox, p.oy) < EPS && Math.hypot(q.ix, q.iy) < EPS) continue;
+        edges.push(rc.makeBezierCurve([[p.x, p.y, z0], [p.x + p.ox, p.y + p.oy, z0 + (z1 - z0) / 3], [q.x + q.ix, q.y + q.iy, z0 + (2 * (z1 - z0)) / 3], [q.x, q.y, z1]]));
+      }
+      return rc.assembleWire(edges);
+    };
+    const last = e.sections[e.sections.length - 1], first = e.sections[0];
+    const wires = [wire(last.nodes, () => zLow)];
+    for (let k = e.sections.length - 1; k >= 0; k--) wires.push(wire(e.sections[k].nodes, (i) => e.sections[k].z[i]));
+    wires.push(wire(first.nodes, () => T + 2 * PAST));
     let keep;
-    try {
-      keep = drawNodes(rc, e.outer, back).sketchOnPlane('XY', z0).loftWith([drawNodes(rc, e.inner, back).sketchOnPlane('XY', T), drawNodes(rc, e.inner, back).sketchOnPlane('XY', T + 2 * PAST)], { ruled: true });
-    } catch (err) {
-      throw new Error('The bevel around the top edge could not be built. Its inner line probably crosses itself: make the bevel narrower where the outline turns tightly, then try again.');
+    try { keep = rc.loft(wires, { ruled: true }); } catch (err) {
+      throw new Error('The bevel around the top edge could not be built. Make it narrower where the outline turns tightly, then try again.');
     }
-    tools.push(prism(rc.drawRoundedRectangle(b.w + 2 * m, b.h + 2 * m).translate(b.x0 + b.w / 2, b.y0 + b.h / 2), z0, T + PAST).cut(keep));
+    tools.push(prism(rc.drawRoundedRectangle(b.w + 2 * m, b.h + 2 * m).translate(b.x0 + b.w / 2, b.y0 + b.h / 2), zLow + 1, T + PAST).cut(keep));
   }
-
   // binding channel: everything outside its inner edge, from the channel floor up
   if (g.binding && g.binding.inner.length) {
     const b = g.bbox, m = 20, zf = T - g.binding.depth;
@@ -234,6 +245,8 @@ export function buildBodySolid(rc, oc, design, g, { roundovers = true, pockets =
       tools.push(h.side === 'back' ? rc.makeCylinder(h.d / 2, d + PAST, [h.x, h.y, -PAST], [0, 0, 1]) : rc.makeCylinder(h.d / 2, d + PAST, [h.x, h.y, T - d], [0, 0, 1]));
     }
   }
+  // (The purfling channel is not cut here: along the bevel's crease the engine does not cut it reliably. It is
+  // in the 3D picture and the CNC vectors, and the save dialog says it is not in the 3D file.)
   if (tools.length) body = cutAll(rc, oc, body, tools);
   // the engine's own check that the result is a sound, closed solid
   const checker = new oc.BRepCheck_Analyzer(body.wrapped, true, false);

@@ -2,7 +2,7 @@
 // whatever is cut away at that height), so pockets, edge roundovers and bevels all come out of the
 // same polygon math that makes the templates. Used for the 3D view and for volume, weight and balance.
 // z = 0 is the back face, z = thickness is the top face.
-import { offset, difference, toRegion, regionCentroid } from '../core/clip.js';
+import { offset, difference, intersect, toRegion, regionCentroid } from '../core/clip.js';
 import { WOODS } from '../data/parts.js';
 import { edgeRounds } from './design.js';
 
@@ -261,7 +261,10 @@ export function buildLayers(design, g) {
   const add = (z) => { if (z > 1e-6 && z < T - 1e-6) zs.add(Math.round(z * 1e4) / 1e4); };
   for (const r of removed) { add(r.z0); add(r.z1); }
   if (bind) add(T - bind.depth);
-  if (edge) for (let i = 0; i <= EDGE_STEPS; i++) add(T - edge.drop + (edge.drop * i) / EDGE_STEPS);
+  if (edge && edge.deepest > 0) for (let i = 0; i <= EDGE_STEPS; i++) add(T - edge.deepest + (edge.deepest * i) / EDGE_STEPS);
+  const purf = g.purfling || null;
+  const purfRing = purf ? difference(toRegion(purf.outer), toRegion(purf.inner)) : null;
+  if (purf) add(T - purf.depth);
   const topBand = [], backBand = [];
   if (rT > 0.05) for (let i = 0; i <= ROUND_STEPS; i++) { const th = (i / ROUND_STEPS) * (Math.PI / 2); const z = T - rT + rT * Math.sin(th); topBand.push({ z, th }); add(z); }
   if (rB > 0.05) for (let i = 0; i <= ROUND_STEPS; i++) { const th = (i / ROUND_STEPS) * (Math.PI / 2); const z = rB - rB * Math.sin(th); backBand.push({ z, th }); add(z); }
@@ -296,11 +299,15 @@ export function buildLayers(design, g) {
     if (bind && zm > T - bind.depth) inset = Math.max(inset, bind.width);
     let region = insetRegion(inset);
     // bevel around the top edge: at this height the body is the shape partway from the outline to the inner line
-    if (edge && zm > T - edge.drop) {
-      const k = (zm - (T - edge.drop)) / edge.drop;
-      region = toRegion([edge.at(k)]);
-      tag.edge = { k, drop: edge.drop };
+    // (where the bevel is shallower than this height the shape lies outside the body, and the body is left whole)
+    if (edge && edge.deepest > 0 && zm > T - edge.deepest) {
+      const pts = edge.shapeAt(zm), lower = edge.shapeAt(z0), upper = edge.shapeAt(z1);
+      region = intersect(region, toRegion([pts]));
+      // for shading: how far the bevel's edge moves in across this slice, and which way, at each point
+      tag.edge = { pts, dz: z1 - z0, run: pts.map((_, i) => Math.hypot(lower[i].x - upper[i].x, lower[i].y - upper[i].y)), out: pts.map((_, i) => ({ x: lower[i].x - upper[i].x, y: lower[i].y - upper[i].y })) };
     }
+    // purfling channel: a narrow groove just inside the bevel's inner line
+    if (purfRing && zm > T - purf.depth) region = difference(region, purfRing);
     if (arm && zm > T - arm.drop) {
       const cutAway = arm.region(T - zm);
       if (cutAway.length) region = difference(region, cutAway);

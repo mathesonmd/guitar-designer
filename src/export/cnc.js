@@ -58,8 +58,12 @@ export function buildCncVectors(design, g, { units = 'mm' } = {}) {
     line(guide, { x: g.bbox.x0, y: 0 }, { x: g.bbox.x1, y: 0 });
 
     if (!flip && g.bevelEdge) {
-      const name = `TOP_EDGE_BEVEL_INNER_LINE_${sized(g.bevelEdge.drop, units)}_DEEP_AT_THE_BODY_EDGE`;
-      poly(layer(name, 'Bevel around the top edge, inner line', g.bevelEdge.drop, 'the bevel runs flat from this line, at the top, down to that depth at the body outline; a guide for 3D work, not a pocket'), g.bevelEdge.innerPoly);
+      const name = `TOP_EDGE_BEVEL_INNER_LINE_UP_TO_${sized(g.bevelEdge.deepest, units)}_DEEP_AT_THE_BODY_EDGE`;
+      poly(layer(name, 'Bevel around the top edge, inner line', g.bevelEdge.deepest, 'the bevel runs from this line, at the top, down to the body outline, where it is that deep at its deepest; a guide for 3D work, not a pocket'), g.bevelEdge.innerPoly);
+    }
+    if (!flip && g.purfling) {
+      const name = `TOP_PURFLING_CHANNEL_${sized(g.purfling.width, units)}_WIDE_${sized(g.purfling.depth, units)}_DEEP`;
+      for (const p of [...g.purfling.outer, ...g.purfling.inner]) poly(layer(name, 'Purfling channel, both edges', g.purfling.depth, `the channel is the ${both(g.purfling.width)} between these two lines`), p);
     }
     if (!flip && g.binding) {
       const name = `TOP_BINDING_CHANNEL_INNER_EDGE_${sized(g.binding.width, units)}_WIDE_${sized(g.binding.depth, units)}_DEEP`;

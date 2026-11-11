@@ -5,7 +5,7 @@ import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
 import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis } from '../model/design.js';
-import { setSymmetric } from '../core/path.js';
+import { setSymmetric, storedIndex } from '../core/path.js';
 import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
 import { toolOffset, defaultRegHoles } from '../model/templates.js';
 import { bevelPlane, bellyDish } from '../model/solid.js';
@@ -267,18 +267,39 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
               {(() => {
                 const eb = design.body.edgeBevel, made = g.bevelEdge;
                 const setE = (patch) => set('body', { edgeBevel: { ...eb, ...patch } });
-                const start = <Basis kind="assumed" text="A starting size only. This bevel is shaped by eye: set the depth and drag the inner line to what you want to carve." />;
-                const held = made ? made.handles.filter((h) => h.width < h.asked - 0.05).length : 0;
+                const start = <Basis kind="assumed" text="A starting size only. This bevel is shaped by eye: set these to what you want to carve." />;
+                const strip = <Basis kind="assumed" text="A starting size only. Purfling strip comes in many sizes: measure the strip you have." />;
+                const narrow = made ? made.handles.filter((h) => h.width < h.asked - 0.05).length : 0;
+                const shallow = made ? made.handles.filter((h) => h.depth < h.askedDepth - 0.05).length : 0;
+                // the outline point whose diamond is picked on the drawing
+                const j = sel && sel.kind === 'edgebevel' && eb.on ? storedIndex(design.outline, sel.i) : -1;
+                const node = j >= 0 ? design.outline.nodes[j] : null;
+                const setNode = (patch) => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map((q, k) => (k === j ? { ...q, ...patch } : q)) } }));
+                const clear = (q) => { const { bw, bd: depthHere, ...rest } = q; return rest; };
                 return (
                   <>
                     <Row label=""><Check checked={eb.on} onChange={(v) => setE({ on: v })}>Bevel around the top edge</Check></Row>
-                    {eb.on && <Row label="Depth at the body edge" htmlFor="eb-drop" basis={start}><Len id="eb-drop" units={u} value={eb.drop} min={0.5} max={design.body.thickness - 3} onChange={(v) => setE({ drop: v })} /></Row>}
                     {eb.on && <Row label="Width" htmlFor="eb-width" basis={start}><Len id="eb-width" units={u} value={eb.width} min={0} max={150} onChange={(v) => setE({ width: v })} /></Row>}
-                    {eb.on && <Row label=""><button className="btn small" onClick={() => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map((n) => { const { bw, ...rest } = n; return rest; }) } }))}>Set every point to this width</button></Row>}
-                    {eb.on && <p className="note">A flat bevel from an inner line on the top down to the body edge. The inner line starts as the outline moved in by the width above. Shape it by dragging the brass diamonds on the drawing: each one sets how wide the bevel is at that point of the outline. Add a point to the outline to get another diamond.</p>}
-                    {eb.on && held > 0 && <p className="note">At {held} {held === 1 ? 'point' : 'points'} the bevel is held narrower than asked, because the body has no room for more there (a horn tip, a corner or a tight curve).</p>}
+                    {eb.on && <Row label="Depth at the body edge" htmlFor="eb-drop" basis={start}><Len id="eb-drop" units={u} value={eb.drop} min={0} max={design.body.thickness - 3} onChange={(v) => setE({ drop: v })} /></Row>}
+                    {eb.on && <Row label="How far the bevel is rolled" htmlFor="eb-roll"><Num id="eb-roll" value={Math.round((eb.roll || 0) * 100)} min={0} max={100} step={5} suffix="%" onChange={(v) => setE({ roll: v / 100 })} /></Row>}
+                    {eb.on && <p className="note">A bevel from an inner line on the top down to the body edge. The width and depth above apply all the way around until you change a point: every point of the outline has a brass diamond on the inner line. Drag a diamond to set how wide the bevel is there, or click it to give that point its own width and depth below. Add a point to the outline to get another diamond.</p>}
+                    {eb.on && <p className="note"><b>To make the bevel taper to nothing</b>, drag a diamond onto the outline or set that point’s width to 0. The bevel then narrows to a point there, from full size at the points either side. <b>Rolled 0%</b> the bevel is flat. <b>100%</b> it leaves the top level, with no crease, and steepens toward the edge; a rolled bevel is made of {made ? made.strips : 8} narrow flat strips that stay within a few hundredths of a millimeter of the curve.</p>}
+                    {node && (
+                      <div className="card sel" data-k="eb-point">
+                        <Row label="This point: width" htmlFor="eb-pt-w"><Len id="eb-pt-w" units={u} value={node.bw !== undefined ? node.bw : eb.width} min={0} max={150} onChange={(v) => setNode({ bw: v })} /></Row>
+                        <Row label="This point: depth at the edge" htmlFor="eb-pt-d"><Len id="eb-pt-d" units={u} value={node.bd !== undefined ? node.bd : eb.drop} min={0} max={design.body.thickness - 3} onChange={(v) => setNode({ bd: v })} /></Row>
+                        <Row label=""><button className="btn small" onClick={() => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map((q, k) => (k === j ? clear(q) : q)) } }))}>Use the general sizes at this point</button></Row>
+                      </div>
+                    )}
+                    {eb.on && <Row label=""><button className="btn small" onClick={() => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map(clear) } }))}>Set every point to the general sizes</button></Row>}
+                    {eb.on && narrow > 0 && <p className="note">At {narrow} {narrow === 1 ? 'point' : 'points'} the bevel is held narrower than asked, because the body has no room for more there (a horn tip, a corner or a tight curve).</p>}
+                    {eb.on && shallow > 0 && <p className="note">At {shallow} {shallow === 1 ? 'point' : 'points'} the depth is held to three times the width there, so the bevel is never steeper than that.</p>}
                     {eb.on && made && made.crosses && <p className="note" style={{ color: 'var(--torch)' }}>The inner line crosses itself. Make the bevel narrower where the outline turns tightly; it cannot be cut as drawn.</p>}
-                    {eb.on && <p className="note">While this bevel is on, the top roundover and the binding channel are left out: the bevel takes the top edge. It is in the 3D view, the 3D model and the CNC vectors. It is not on the routing templates.</p>}
+                    {eb.on && <Row label=""><Check checked={!!eb.purfling} onChange={(v) => setE({ purfling: v })}>Purfling channel along the inner line</Check></Row>}
+                    {eb.on && eb.purfling && <Row label="Purfling width" htmlFor="pf-w" basis={strip}><Len id="pf-w" units={u} value={eb.purflingWidth} min={0.3} max={10} onChange={(v) => setE({ purflingWidth: v })} /></Row>}
+                    {eb.on && eb.purfling && <Row label="Purfling depth" htmlFor="pf-d" basis={strip}><Len id="pf-d" units={u} value={eb.purflingDepth} min={0.3} max={design.body.thickness - 3} onChange={(v) => setE({ purflingDepth: v })} /></Row>}
+                    {eb.on && eb.purfling && <p className="note">A narrow groove in the top, between the bevel’s inner line and the dashed line just inside it. It follows the inner line all the way around, including along the body edge where the bevel has tapered to nothing. It is in the 3D view and the CNC vectors, to cut as a 2D channel. It is not in the saved 3D model.</p>}
+                    {eb.on && <p className="note">Where the bevel is cut, it takes the top edge; where it has tapered to nothing, the top roundover is still there. The binding channel is left out while this bevel is on. The bevel is in the 3D view, the 3D model and the CNC vectors. It is not on the routing templates.</p>}
                   </>
                 );
               })()}

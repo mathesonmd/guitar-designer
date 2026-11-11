@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 63 geometry and export tests (24 of them build the CAD solid)
+    npm test                  # 68 geometry and export tests (27 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 33 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -69,8 +69,13 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   when the body is rolled against it, so it is curved in one direction only and straight in the other;
   the belly cut is a wide, short cone removed like a boolean cut, with a short smooth transition.
   Do not make the arm bevel doubly curved by default.
-- The bevel around the top edge (`g.bevelEdge` in `derive.js`) pairs the outline with an inner line node
-  for node; both solids join matching points with straight lines, so they agree to about 0.001%. The 3D
+- The bevel around the top edge (`src/model/edgebevel.js`, `g.bevelEdge`) defines its surface once, as
+  sections that pair up point for point; both solids join matching points with straight lines, so they
+  agree to about 0.002%. The owner's first sample had a wavy inner line: the line must be a smooth curve
+  through the moved points (never the outline's own handles carried across), and widths must blend
+  smoothly between points. `test/step.test.mjs` checks for kinks and for wobble.
+- Do not cut the purfling channel in the CAD solid along the bevel's crease: OpenCascade returned flawed
+  solids, wrong volumes and a crash on some outlines, and took about 20 seconds when it worked. The 3D
   view derives the body with a coarser outline (tol 0.1) than the files do: anything that measures
   against the outline polygon must allow for that, or the picture and the file will differ.
 - Contours live in `solid.js` as depth functions (`bevelPlane`, `bevelProfile`, `bellyDish`); `step.js`
@@ -102,7 +107,8 @@ and custom necks; six pickup cavities plus a custom rectangle; three bridges; co
 arm bevel (rolled like a flat-sander cut: straight along its line, curved across it; optionally flatter,
 blended, or kept between its squares with a run-out) and belly cut (a wide, short cone sized by center,
 length, reach and depth, with a short rim blend); a bevel around the top edge shaped from an inner line
-(a width at each outline point); live build checks; 3D view; templates with bearing or bushing
+(a width and a depth at each outline point, tapering to nothing where a width is 0, flat or rolled),
+with a purfling channel along its inner line; live build checks; 3D view; templates with bearing or bushing
 offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; 2D CNC vectors for
 pockets and holes, in millimeters or inches; a 3D model of the body as STEP (true solid) or STL (fine
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
@@ -110,7 +116,8 @@ roundover; a binding channel; hole depths entered per hardware.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
 carved tops, a 3D neck (profile, heel, volute, headstock), STEP roundovers larger than the outline's
-tightest outside curve, the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
+tightest outside curve, the purfling channel in the STEP and STL (it is in the 3D picture and the CNC
+vectors only), the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
 
 **Never checked in the real world:** nothing has been cut on a laser or routed in wood; the files have
 not been opened in LightBurn, Vectric or Fusion (the owner opened a STEP file in his 3D printing slicer,
@@ -125,9 +132,8 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- Whether the bevel around the top edge is the "organic bevel" he meant: one flat facet from a shaped
-  inner line to the edge. Open choices: a rolled or blended profile, a depth that varies along the edge,
-  and keeping a binding or purfling line with it.
+- Whether the reworked edge bevel is smooth in Aspire (his first sample came out wavy) and whether its
+  controls do what he wants: width and depth at each point, tapering to nothing, the roll, purfling.
 - He would adjust the arm bevel and belly cut further but says they will work.
 - Whether centering now lines the vectors up exactly with the model in Aspire, and whether inch files
   import at the right size.

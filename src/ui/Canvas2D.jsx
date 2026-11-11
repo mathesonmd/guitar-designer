@@ -81,7 +81,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     else if (k === 'cavity') { const c = design.cavities.find((q) => q.id === id); setSel({ kind: 'cavity', id }); drag.current = { kind: 'cavity', id, w0: w, p0: { ...c } }; }
     else if (k === 'bevel') { setSel({ kind: 'bevel', id }); drag.current = { kind: 'bevel', id, i: id === 'belly' ? t.dataset.i : i }; }
     else if (k === 'reg') { drag.current = { kind: 'reg', i }; }
-    else if (k === 'edgebevel') { const h = g.bevelEdge && g.bevelEdge.handles.find((q) => q.i === i); if (h) drag.current = { kind: 'edgebevel', i, at: h.outer, n: h.normal }; }
+    else if (k === 'edgebevel') { const h = g.bevelEdge && g.bevelEdge.handles.find((q) => q.i === i); setSel({ kind: 'edgebevel', i }); if (h) drag.current = { kind: 'edgebevel', i, at: h.outer, n: h.normal }; }
   };
 
   const onMove = (e) => {
@@ -289,6 +289,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
           {bellyEdge && <path d={polyD(bellyEdge)} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="2 5" {...NS} clipPath="url(#bodyclip)" />}
           {bellyEdge && bellyHandles && <path d={`M${bellyHandles.l.x} ${bellyHandles.l.y}L${bellyHandles.c.x} ${bellyHandles.c.y}L${bellyHandles.w.x} ${bellyHandles.w.y}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
 
+          {g.purfling && g.purfling.inner.map((p, i) => <path key={'purf' + i} d={polyD(p)} data-k="purfling" stroke="var(--brass)" strokeWidth="1" strokeDasharray="3 3" fill="none" {...NS} style={{ pointerEvents: 'none' }} />)}
           {g.bevelEdge && <path d={polyD(g.bevelEdge.innerPoly)} data-k="edgeline" stroke="var(--brass)" strokeWidth="1.3" fill="none" {...NS} style={{ pointerEvents: 'none' }} />}
           {g.binding && g.binding.inner.map((p, i) => <path key={'bind' + i} d={polyD(p)} data-k="binding" stroke="var(--brass)" strokeWidth="1" strokeDasharray="5 3" fill="none" {...NS} />)}
           {show.cavities && <path d={polyD(g.pocket)} stroke="var(--bone-dim)" strokeWidth="1.2" fill="rgba(20,18,16,.55)" {...NS} clipPath="url(#bodyclip)" />}
@@ -346,9 +347,9 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
         </g>
 
         {g.bevelEdge && g.bevelEdge.handles.map((h) => {
-          const p = S(h.inner);
-          return <g key={'eb' + h.i} data-k="edgebevel" data-i={h.i} style={{ cursor: 'move' }}>
-            <circle cx={p.x} cy={p.y} r="11" fill="transparent" /><rect x={p.x - 4} y={p.y - 4} width="8" height="8" transform={`rotate(45 ${p.x} ${p.y})`} fill="var(--forge)" stroke="var(--brass)" strokeWidth="1.6" />
+          const p = S(h.inner), picked = sel && sel.kind === 'edgebevel' && sel.i === h.i;
+          return <g key={'eb' + h.i} data-k="edgebevel" data-i={h.i} data-picked={picked ? '1' : undefined} style={{ cursor: 'move' }}>
+            <circle cx={p.x} cy={p.y} r="11" fill="transparent" /><rect x={p.x - (picked ? 5.5 : 4)} y={p.y - (picked ? 5.5 : 4)} width={picked ? 11 : 8} height={picked ? 11 : 8} transform={`rotate(45 ${p.x} ${p.y})`} fill={picked ? 'var(--brass)' : 'var(--forge)'} stroke="var(--brass)" strokeWidth="1.6" />
           </g>;
         })}
 

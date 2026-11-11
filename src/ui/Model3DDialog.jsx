@@ -109,7 +109,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
         {hasRound && (roll
           ? <li>Edge roundovers rolled around the outline{rT > 0.05 ? `, top ${both(rT)}` : ''}{rB > 0.05 ? `, back ${both(rB)}` : ''}.</li>
           : <li>Square edges. The roundovers are left for you to rout by hand.</li>)}
-        {g.bevelEdge && <li>The bevel around the top edge, {both(g.bevelEdge.drop)} deep at the body edge, flat from the inner line you shaped.</li>}
+        {g.bevelEdge && g.bevelEdge.deepest > 0 && <li>The bevel around the top edge, {g.bevelEdge.roll > 0 ? `rolled ${Math.round(g.bevelEdge.roll * 100)}%` : 'flat'}, from the inner line you shaped down to as much as {both(g.bevelEdge.deepest)} at the body edge{g.bevelEdge.handles.some((h) => h.width < 0.05) ? ', tapering to nothing where you set it to' : ''}.</li>}
         {g.binding && <li>The binding channel around the top edge, {both(g.binding.width)} wide and {both(g.binding.depth)} deep.</li>}
         {arm && <li>The arm bevel, {arm.roll >= 0.99 ? 'rolled so it leaves the top with no crease' : arm.crown > 0 ? 'as a curved cut' : 'as a flat cut'}{arm.blend > 0 ? ', with its crease rounded' : ''}{arm.bounded ? (arm.fade > 0 ? ', running out to nothing at each end of its line' : ', stopping square at each end of its line') : ', straight along its line right across the body'}.</li>}
         {belly && <li>The belly cut, as a shallow cone{belly.blend > 0 ? ' with a rounded rim' : ' with a sharp rim'}.</li>}
@@ -120,6 +120,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
       <h4>Not in the 3D file</h4>
       <ul className="plain">
         {!withPockets && <li>Pockets and holes. Cut them from the 2D vectors.</li>}
+        {g.purfling && <li>The purfling channel. It cannot yet be cut reliably into the 3D model along the bevel’s crease. Cut it from the 2D vectors, where it has its own layer.</li>}
         {withPockets && left.map((l) => <li key={l.what}>{l.what} ({l.count}). No depth has been entered for these, so they are not drilled in the model. Enter one under Bridge and strings, or mark them from the 2D vectors.</li>)}
         <li>The neck, frets, bridge, pickups and knobs.</li>
       </ul>

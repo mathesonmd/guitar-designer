@@ -2,7 +2,7 @@
 // Frame: x = 0 on the centerline (+x = treble side, as seen from the front with the neck up),
 // y = 0 on the scale line (exactly one scale length from the nut), +y toward the neck.
 import { NECK_PRESETS } from '../data/necks.js';
-import { BINDING_START, BELLY_BLEND_START, EDGE_BEVEL_START } from '../data/parts.js';
+import { BINDING_START, BELLY_BLEND_START, EDGE_BEVEL_START, PURFLING_START } from '../data/parts.js';
 import { bellyParams } from './solid.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
@@ -122,17 +122,25 @@ export function makeBridge(type) {
 export function edgeRounds(design) {
   const b = design.body, T = b.thickness, lim = (r) => Math.max(0, Math.min(r || 0, T / 2 - 0.5));
   return {
-    top: b.roundTopOn === false || (b.binding && b.binding.on) || edgeBevel(design) ? 0 : lim(b.roundTop),
+    top: b.roundTopOn === false || (b.binding && b.binding.on && !edgeBevel(design)) ? 0 : lim(b.roundTop),
     back: b.roundBackOn === false ? 0 : lim(b.roundBack),
   };
 }
 
-// The bevel around the top edge, or null when it is off: `drop` deep at the body edge, starting at an
-// inner line set in from the outline by each outline point's own width (`width` where a point has none).
+// The bevel around the top edge, or null when it is off. `width` and `drop` are its general width and its
+// general depth at the body edge; an outline point can carry its own (`bw`, `bd`). `roll` is 0 for a flat
+// bevel, up to 1 for one that leaves the top level and steepens toward the edge.
 export function edgeBevel(design) {
   const c = design.body.edgeBevel, T = design.body.thickness;
-  if (!c || !c.on || !(c.drop > 0.05)) return null;
-  return { width: Math.max(0, c.width || 0), drop: Math.min(c.drop, T - 3) };
+  if (!c || !c.on) return null;
+  return { width: Math.max(0, c.width || 0), drop: Math.max(0, Math.min(c.drop || 0, T - 3)), roll: Math.max(0, Math.min(1, c.roll || 0)) };
+}
+
+// The purfling channel that follows the edge bevel's inner line, or null when it is off (or there is no bevel).
+export function purflingChannel(design) {
+  const c = design.body.edgeBevel, T = design.body.thickness;
+  if (!edgeBevel(design) || !c.purfling || !(c.purflingWidth > 0.05) || !(c.purflingDepth > 0.05)) return null;
+  return { width: c.purflingWidth, depth: Math.min(c.purflingDepth, T - 3) };
 }
 
 // The binding channel, or null when it is off: a ledge `width` in from the body edge, `depth` down from the top.
@@ -149,7 +157,7 @@ export function defaultDesign() {
     name: 'Untitled guitar',
     units: 'in',
     outline: JSON.parse(JSON.stringify(STARTERS.doublecut.outline)),
-    body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, edgeBevel: { on: false, ...EDGE_BEVEL_START }, wood: 'alder', customDensity: 500 },
+    body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, edgeBevel: { on: false, ...EDGE_BEVEL_START, roll: 0, purfling: false, purflingWidth: PURFLING_START.width, purflingDepth: PURFLING_START.depth }, wood: 'alder', customDensity: 500 },
     neck: applyNeckPreset({}, 'fender22'),
     strings: { count: 6, nutSpread: 1.375 * IN },
     compensation: { treble: 0.03 * IN, bass: 0.09 * IN },
