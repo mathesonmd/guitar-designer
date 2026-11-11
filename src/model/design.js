@@ -3,6 +3,7 @@
 // y = 0 on the scale line (exactly one scale length from the nut), +y toward the neck.
 import { NECK_PRESETS } from '../data/necks.js';
 import { BINDING_START, BELLY_BLEND_START, EDGE_BEVEL_START, PURFLING_START } from '../data/parts.js';
+import { NECK_PROFILES, NECK_SHAPE_START } from '../data/neckprofiles.js';
 import { bellyParams } from './solid.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
@@ -113,6 +114,12 @@ export function unverifiedNeckKeys(design) {
 }
 
 // `depths` holds the builder's own drilling depths, by hole group (see HOLE_DEPTH_GROUPS). Empty = not set.
+// The shape of the neck's back: a thickness profile (published) and three shape settings (starting values).
+export function makeNeckBack(profile) {
+  const p = NECK_PROFILES[profile] || NECK_PROFILES.standardThin;
+  return { profile: NECK_PROFILES[profile] ? profile : 'standardThin', t1: p.t1, t12: p.t12, ...NECK_SHAPE_START };
+}
+
 export function makeBridge(type) {
   return { type, params: { ...(BRIDGES[type].params || {}) }, depths: {} };
 }
@@ -158,7 +165,7 @@ export function defaultDesign() {
     units: 'in',
     outline: JSON.parse(JSON.stringify(STARTERS.doublecut.outline)),
     body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, edgeBevel: { on: false, ...EDGE_BEVEL_START, roll: 0, purfling: false, purflingWidth: PURFLING_START.width, purflingDepth: PURFLING_START.depth }, wood: 'alder', customDensity: 500 },
-    neck: applyNeckPreset({}, 'fender22'),
+    neck: { ...applyNeckPreset({}, 'fender22'), back: makeNeckBack('standardThin') },
     strings: { count: 6, nutSpread: 1.375 * IN },
     compensation: { treble: 0.03 * IN, bass: 0.09 * IN },
     bridge: makeBridge('hipshot'),
@@ -194,6 +201,7 @@ export function normalizeDesign(raw) {
   out.body.binding = { ...d.body.binding, ...((raw.body || {}).binding || {}) };
   out.body.edgeBevel = { ...d.body.edgeBevel, ...((raw.body || {}).edgeBevel || {}) };
   out.neck = { ...d.neck, ...(raw.neck || {}) };
+  out.neck.back = { ...d.neck.back, ...((raw.neck || {}).back || {}) };
   out.strings = { ...d.strings, ...(raw.strings || {}) };
   out.compensation = { ...d.compensation, ...(raw.compensation || {}) };
   out.bridge = raw.bridge && BRIDGES[raw.bridge.type]

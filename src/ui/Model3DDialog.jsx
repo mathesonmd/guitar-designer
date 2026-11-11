@@ -2,7 +2,7 @@
 // solid) or an STL file (a fine mesh of the same solid, for programs that do not read STEP).
 import React, { useMemo, useState } from 'react';
 import { derive } from '../model/derive.js';
-import { buildBodySolid, holesLeftOut, toSTEP, toSTL, STL_TOLERANCE } from '../export/step.js';
+import { buildBodySolid, buildNeckSolid, holesLeftOut, toSTEP, toSTL, STL_TOLERANCE } from '../export/step.js';
 import { buildCncVectors, cncDXF, cncReadme } from '../export/cnc.js';
 import { makeZip } from '../export/zip.js';
 import { loadCadEngine } from './cadEngine.js';
@@ -33,6 +33,30 @@ export default function Model3DDialog({ design, onClose, toast }) {
   const through = g.holes.filter((h) => h.side === 'through');
   const left = holesLeftOut(g);
   const arm = bevelPlane(design.contours.arm, g.outline, g.centroid, T - 3), belly = bellyDish(design.contours.belly, T - 3);
+
+  const [neckBusy, setNeckBusy] = useState('');
+  const [neckResult, setNeckResult] = useState(null);
+  const saveNeck = async () => {
+    setNeckResult(null);
+    try {
+      setNeckBusy('Fetching the 3D engine…');
+      let cad;
+      try { cad = await loadCadEngine(); } catch (e) { throw new Error('The 3D engine could not be fetched. Check your connection and try again.'); }
+      setNeckBusy('Building the neck…');
+      await new Promise((r) => setTimeout(r, 60));
+      const built = buildNeckSolid(cad.rc, cad.oc, g.neck, { expectVolume: g.neck.volume });
+      const blob = kind === 'stl'
+        ? new Blob([toSTL(built.shape, { units: fileUnits }).data], { type: 'model/stl' })
+        : new Blob([await toSTEP(cad.rc, built.shape, `${design.name} neck`)], { type: 'model/step' });
+      try { built.shape.delete(); } catch (e) { /* already released */ }
+      const res = await saveFile(`${slug(design.name)}-neck.${kind}`, blob);
+      setNeckResult(res);
+      toast(res.message);
+    } catch (e) {
+      setNeckResult({ ok: false, message: e instanceof Error && e.message ? e.message : 'The neck could not be built from this design.' });
+    }
+    setNeckBusy('');
+  };
 
   const save = async () => {
     setResult(null);
@@ -152,7 +176,26 @@ export default function Model3DDialog({ design, onClose, toast }) {
             <button className="btn primary" disabled={!!busy} onClick={save}>{busy || `Save 3D model (.${kind})`}</button>
             {result && <span role="status" style={{ color: result.ok ? 'var(--bone)' : 'var(--torch)', fontSize: 12.5, flex: '1 1 260px' }}>{result.message}</span>}
           </div>
-          <p className="note">The first save fetches the 3D engine, a download of about 7 MB. After that, building the model takes a few seconds, and the page does not respond while it works.</p>
+          <p className="note">The first save fetches the 3D engine, a download of about 7 MB. After that, building the model takes a few seconds, and the page does not respond while it works. If a save fails that worked earlier in the same visit, reload the page and try again: after many models the 3D engine can run short of memory.</p>
+        </>
+      )}
+      {g.neck && (
+        <>
+          <h4>3D model of the neck</h4>
+          <p>The neck’s shaft and heel, as a {kind === 'stl' ? 'mesh (STL)' : 'solid (STEP)'} in the file type chosen above. It sits where it belongs in the pocket, in the same position as the body model, so the two fit together when both are opened.</p>
+          <ul className="plain">
+            <li>A flat top, where the fretboard is glued. The fretboard and frets are not part of it.</li>
+            <li>The back: {both(g.neck.d1)} of wood at the 1st fret and {both(g.neck.d12)} at the 12th, blending over {both(g.neck.blend)} into the heel.</li>
+            <li>The heel: a block {both(g.neck.heelDepth)} deep with the pocket’s own outline. It is {both(g.neck.length)} from the nut to the end of the heel.</li>
+          </ul>
+          <p className="note"><b>Not in the file:</b> the headstock and volute, the truss rod channel, and the heel’s screw holes. The neck ends square at the nut.</p>
+          <p className="note" style={{ color: 'var(--brass)' }}>Not yet checked in the real world: a neck file from here has not been opened in any program, and nothing has been cut from it. The shape of the back is a starting curve with no published source: compare it with a neck you like before cutting.</p>
+          {inViewer() ? null : (
+            <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>
+              <button className="btn primary" disabled={!!neckBusy || !!busy} onClick={saveNeck}>{neckBusy || `Save neck model (.${kind})`}</button>
+              {neckResult && <span role="status" data-k="neck-status" style={{ color: neckResult.ok ? 'var(--bone)' : 'var(--torch)', fontSize: 12.5, flex: '1 1 260px' }}>{neckResult.message}</span>}
+            </div>
+          )}
         </>
       )}
     </Dialog>

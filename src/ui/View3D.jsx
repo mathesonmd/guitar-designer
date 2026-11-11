@@ -98,7 +98,7 @@ export default function View3D({ design, g, solid, onSaveModel }) {
     clear(st.extras);
     if (!parts) { st.render(); return; }
     const T = solid.T, nk = design.neck;
-    const zHeelTop = T + nk.heelStandProud, zBoardTop = zHeelTop + 5;
+    const zHeelTop = T + nk.heelStandProud, zBoardTop = zHeelTop + (g.neck ? g.neck.board : 5);
     const mat = (color, rough = 0.6, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
     const maple = mat(0xdcc394, 0.55), board = mat(0x3a281d, 0.7), metal = mat(0x8f949a, 0.42, 0.35), black = mat(0x151515, 0.5), bone = mat(0xede6d8, 0.5);
     const ex = (poly, z0, z1, material) => {
@@ -108,16 +108,25 @@ export default function View3D({ design, g, solid, onSaveModel }) {
       mesh.position.z = z0;
       st.extras.add(mesh);
     };
-    // heel block in the pocket, then the neck shaft as a half-round, then a plain paddle headstock
-    const yShaft = g.heelY + nk.pocketLength;
+    // the neck's own shape (model/neck.js): the heel block in the pocket and the shaft through its
+    // cross-sections; then a plain paddle headstock, which is only a stand-in
     const h = g.neckHalf;
-    ex([{ x: -h(g.heelY), y: g.heelY }, { x: h(g.heelY), y: g.heelY }, { x: h(yShaft), y: yShaft }, { x: -h(yShaft), y: yShaft }], T - nk.pocketDepth, zHeelTop, maple);
-    const stations = 26, ring = 14, pos = [];
-    const pt = (i, j) => { const y = yShaft + ((g.nutY - yShaft) * i) / stations; const w = h(y), d = 21 - (4 * i) / stations; const a = (Math.PI * j) / ring; return [w * Math.cos(a), y, zHeelTop - d * Math.sin(a)]; };
-    for (let i = 0; i < stations; i++) for (let j = 0; j < ring; j++) { const a = pt(i, j), b = pt(i + 1, j), c = pt(i + 1, j + 1), d = pt(i, j + 1); pos.push(...a, ...b, ...c, ...a, ...c, ...d); }
-    const shaft = new THREE.BufferGeometry(); shaft.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); shaft.computeVertexNormals();
-    const shaftMat = maple.clone(); shaftMat.side = THREE.DoubleSide;
-    st.extras.add(new THREE.Mesh(shaft, shaftMat));
+    const neck = g.neck, zTop = neck ? neck.top : zHeelTop;
+    if (neck) {
+      ex(neck.heel, neck.heelBottom, neck.top, maple);
+      const secs = neck.sections, pos = [], P = (s, p) => [p.x, s.y, neck.top + p.z];
+      for (let i = 0; i < secs.length - 1; i++) {
+        const a = secs[i], b = secs[i + 1], m = a.pts.length;
+        for (let j = 0; j < m - 1; j++) pos.push(...P(a, a.pts[j]), ...P(b, b.pts[j]), ...P(b, b.pts[j + 1]), ...P(a, a.pts[j]), ...P(b, b.pts[j + 1]), ...P(a, a.pts[j + 1]));
+        // the flat top between the two sections
+        pos.push(...P(a, a.pts[0]), ...P(a, a.pts[m - 1]), ...P(b, b.pts[m - 1]), ...P(a, a.pts[0]), ...P(b, b.pts[m - 1]), ...P(b, b.pts[0]));
+      }
+      const first = secs[0]; // the end at the nut
+      for (let j = 1; j < first.pts.length - 1; j++) pos.push(...P(first, first.pts[0]), ...P(first, first.pts[j + 1]), ...P(first, first.pts[j]));
+      const shaft = new THREE.BufferGeometry(); shaft.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); shaft.computeVertexNormals();
+      const shaftMat = maple.clone(); shaftMat.side = THREE.DoubleSide;
+      st.extras.add(new THREE.Mesh(shaft, shaftMat));
+    }
     const hw = h(g.nutY);
     ex([{ x: -hw, y: g.nutY }, { x: hw, y: g.nutY }, { x: hw + 16, y: g.nutY + 40 }, { x: hw + 14, y: g.nutY + 165 }, { x: -hw + 4, y: g.nutY + 178 }, { x: -hw - 6, y: g.nutY + 40 }], zHeelTop - 13, zHeelTop, maple);
     ex(g.fretboard, zHeelTop, zBoardTop, board);
@@ -151,7 +160,7 @@ export default function View3D({ design, g, solid, onSaveModel }) {
         <div className="float" style={{ position: 'static' }}><Check checked={parts} onChange={setParts}>Neck and hardware</Check></div>
         {onSaveModel && <button className="btn" onClick={onSaveModel}>Save files for CNC…</button>}
       </div>
-      <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>Neck and hardware are shown for looks</span></div>
+      <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>The headstock, fretboard and hardware are shown for looks</span></div>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import { fretDistance, fretAt } from '../core/fret.js';
 import { BRIDGES, holeDepthGroup } from '../data/bridges.js';
 import { bindingChannel, purflingChannel } from './design.js';
 import { buildEdgeBevel } from './edgebevel.js';
+import { buildNeck } from './neck.js';
 import { PICKUPS } from '../data/pickups.js';
 import { CONTROL_KINDS } from '../data/parts.js';
 
@@ -137,7 +138,7 @@ export function derive(design, { tol = 0.02 } = {}) {
   const purfling = purf ? { ...purf, outer: [bevelEdge.innerPoly], inner: offset([bevelEdge.innerPoly], -purf.width, tol / 2).map((e) => e.outer) } : null;
 
   const area = Math.abs(signedArea(outline));
-  return {
+  const out = {
     outline, bbox: ob, area, centroid: centroid(outline),
     scale, nutY, heelY, boardEndY, neckHalf, pocketHalf,
     pocket, pocketTo, mouthY, fretboard, frets, strings, stringXAt, saddleSpread,
@@ -145,6 +146,8 @@ export function derive(design, { tol = 0.02 } = {}) {
     join: { treble: joinFret(1), bass: joinFret(-1) },
     heelToScale: heelY,
   };
+  out.neck = buildNeck(design, out);
+  return out;
 }
 
 // y where the outline crosses the vertical line x, above yMin (the highest crossing), or null.

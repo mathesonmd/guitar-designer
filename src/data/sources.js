@@ -12,6 +12,7 @@ export const SOURCES = {
   warmothBridgeRouts: { title: 'Warmoth: Guitar Bridge Routs (rout diagrams)', url: 'https://warmoth.com/guitar-bridge-routs' },
   gotohTom: { title: 'Gotoh Tune-O-Matic stud mount bridge diagram (hosted by Warmoth)', url: 'https://warmoth.com/media/skin/images/PDFs/bridges/Gotoh_TuneOMatic_StudBridge_Diagram.pdf' },
   stewmacNeckPlate: { title: 'StewMac: Neck Mounting Plate, item 0131', url: 'https://www.stewmac.com/item/0131' },
+  warmothNeckProfiles: { title: 'Warmoth: Guitar Neck Profiles (thickness at the 1st and 12th frets)', url: 'https://warmoth.com/guitar-neck-profiles' },
   fralin: { title: 'Fralin Pickups: Pickup Dimensions', url: 'https://www.fralinpickups.com/resources/pickup-dimensions/' },
   hipshot: { title: 'Hipshot: Hardtail Bridge Modern, .430 in spacing (drawing 41200M)', url: 'https://docs.hipshotproducts.com/41200M.PDF' },
   woodDb: { title: 'The Wood Database (average dried weight)', url: 'https://www.wood-database.com/' },

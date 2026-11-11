@@ -4,7 +4,8 @@ import { NECK_PRESETS, NECK_FIELDS } from '../data/necks.js';
 import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
-import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis } from '../model/design.js';
+import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack } from '../model/design.js';
+import { NECK_PROFILES, NECK_PROFILE_BASIS } from '../data/neckprofiles.js';
 import { setSymmetric, storedIndex } from '../core/path.js';
 import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
 import { toolOffset, defaultRegHoles } from '../model/templates.js';
@@ -117,6 +118,32 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
           </Row>
         ))}
         <p className="note">Pocket end to scale line: <b className="mono">{fmtWithUnit(g.heelY, u)}</b>. The pocket is cut to the heel’s width and corner radius.</p>
+        {(() => {
+          const b = nk.back, made = g.neck;
+          const setBack = (patch) => change((d) => ({ ...d, neck: { ...d.neck, back: { ...d.neck.back, ...patch } } }));
+          const prof = NECK_PROFILES[b.profile];
+          const own = !prof || Math.abs(prof.t1 - b.t1) > 1e-6 || Math.abs(prof.t12 - b.t12) > 1e-6;
+          const thick = <Basis kind={own ? 'assumed' : NECK_PROFILE_BASIS[0]} text={own ? 'Your own thickness. Measure a neck you like.' : prof.note} src={own ? undefined : NECK_PROFILE_BASIS[1]} />;
+          const guess = (text) => <Basis kind="assumed" text={text} />;
+          return (
+            <>
+              <h4 className="sub">Shape of the neck’s back</h4>
+              <Row label="Thickness profile" wide htmlFor="nb-profile">
+                <select id="nb-profile" value={own ? 'own' : b.profile} onChange={(e) => { if (e.target.value !== 'own') { const p = makeNeckBack(e.target.value); setBack({ profile: p.profile, t1: p.t1, t12: p.t12 }); } }}>
+                  {Object.entries(NECK_PROFILES).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+                  {own && <option value="own">Your own thickness</option>}
+                </select>
+              </Row>
+              <Row label="Thickness at the 1st fret" htmlFor="nb-t1" basis={thick}><Len id="nb-t1" units={u} value={b.t1} min={12} max={35} onChange={(v) => setBack({ t1: v })} /></Row>
+              <Row label="Thickness at the 12th fret" htmlFor="nb-t12" basis={thick}><Len id="nb-t12" units={u} value={b.t12} min={12} max={35} onChange={(v) => setBack({ t12: v })} /></Row>
+              <Row label="Fretboard thickness" htmlFor="nb-board" basis={guess('A starting value with no source. Measure your fretboard at its center. The thicknesses above include the fretboard, so the wood under it is that much thinner.')}><Len id="nb-board" units={u} value={b.board} min={0} max={12} onChange={(v) => setBack({ board: v })} /></Row>
+              <Row label="Fullness of the shoulders" htmlFor="nb-full" basis={guess('A starting value with no source. No maker publishes numbers for the curve of a neck’s back. 2 is a half ellipse; higher fills out the shoulders, lower slims them.')}><Num id="nb-full" value={b.fullness} min={1.2} max={6} step={0.1} digits={1} onChange={(v) => setBack({ fullness: v })} /></Row>
+              <Row label="Blend into the heel" htmlFor="nb-blend" basis={guess('A starting value with no source: the length over which the round back turns into the square heel.')}><Len id="nb-blend" units={u} value={b.blend} min={5} max={150} onChange={(v) => setBack({ blend: v })} /></Row>
+              {made && <p className="note">Wood under the fretboard: <b className="mono">{fmtWithUnit(made.d1, u)}</b> deep at the 1st fret, <b className="mono">{fmtWithUnit(made.d12, u)}</b> at the 12th, and <b className="mono">{fmtWithUnit(made.heelDepth, u)}</b> at the heel (the pocket’s depth plus what stands above the body).</p>}
+              <p className="note">This is the shaft and the heel only, with a flat top where the fretboard is glued. Thickness is held from the nut to the 1st fret, runs straight to the 12th, and is held from there until the back blends into the heel. The neck widens in a straight line from the nut to the pocket’s width where it enters the body. <b>Not built yet:</b> the headstock and volute, the truss rod channel, and the heel’s screw holes. The headstock in the 3D view is only a stand-in.</p>
+            </>
+          );
+        })()}
         <div className="addrow">
           <button className="btn small" onClick={() => fbRef.current.click()}>Load a Fretboard Designer file…</button>
           <input ref={fbRef} type="file" accept=".json,application/json" hidden onChange={(e) => { if (e.target.files[0]) onImportFretboard(e.target.files[0]); e.target.value = ''; }} />

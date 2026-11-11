@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 69 geometry and export tests (Node, no browser)
+    npm test               # 72 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -144,6 +144,20 @@ Known limits of both files, all stated in the save dialog:
 - It is the body only. There is no neck yet.
 - It does not work inside a claude.ai artifact.
 - Building runs on the page's main thread, so the page pauses for a few seconds.
+
+## The neck
+
+`src/model/neck.js` shapes the neck's shaft and heel; `buildNeckSolid` in `src/export/step.js` makes the
+CAD solid; the 3D view draws the same cross-sections.
+
+- A flat top, where the fretboard is glued. The fretboard and frets are not part of it.
+- Thickness at the 1st and 12th frets comes from a profile (`src/data/neckprofiles.js`, Warmoth's
+  published figures) or is typed in. The wood is thinner than that by the fretboard's thickness.
+- Across, the back is a superellipse: fullness 2 is a half ellipse. No maker publishes numbers for this
+  curve, so fullness, fretboard thickness and the blend length are starting values tagged "assumed".
+- The round back blends into a square heel as deep as the pocket plus what stands above the body, with
+  the pocket's own outline. The model sits in the pocket, in the body's own coordinates.
+- Not built: headstock, volute, truss rod channel, heel screw holes.
 
 ## Not built yet
 

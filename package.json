@@ -9,7 +9,7 @@
   },
   "scripts": {
     "build": "node build.mjs",
-    "test": "node --test test/core.test.mjs test/model.test.mjs test/cnc.test.mjs test/step.test.mjs",
+    "test": "node --test test/core.test.mjs test/model.test.mjs test/cnc.test.mjs test/neck.test.mjs test/step.test.mjs",
     "test:browser": "node build.mjs && node test/interact.mjs && node test/viewer.mjs"
   },
   "dependencies": {

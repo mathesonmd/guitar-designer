@@ -331,3 +331,41 @@ export function toSTL(shape, { units = 'mm' } = {}) {
   }
   return { data, triangles: keep.length };
 }
+
+// The neck's shaft and heel as a CAD solid (model/neck.js says exactly what shape that is). The shaft is
+// one smooth surface through its cross-sections; the heel is a block with the pocket's own outline. The
+// shaft runs a little way into the block so the two join as one piece.
+// `expectVolume` works as it does for the body: a solid that is the wrong size is never returned.
+export function buildNeckSolid(rc, oc, neck, { expectVolume } = {}) {
+  // Each cross-section's back is drawn as the same number of short curves, piece for piece, so the
+  // sections pair up along the neck. A piece runs between two of the section's points, leaving and
+  // arriving along the directions of the curve there.
+  const STEP = 3; // every third point of the section starts a new piece
+  const wireOf = (sec) => {
+    const pts = sec.pts, last = pts.length - 1, P = (p) => [p.x, sec.y, neck.top + p.z];
+    const dir = (i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(last, i + 1)], l = Math.hypot(b.x - a.x, b.z - a.z) || 1; return { x: (b.x - a.x) / l, z: (b.z - a.z) / l }; };
+    const edges = [];
+    for (let i = 0; i < last; i += STEP) {
+      const j = Math.min(last, i + STEP), a = pts[i], b = pts[j], ta = dir(i), tb = dir(j), h = Math.hypot(b.x - a.x, b.z - a.z) / 3;
+      edges.push(rc.makeBezierCurve([P(a), P({ x: a.x + ta.x * h, z: a.z + ta.z * h }), P({ x: b.x - tb.x * h, z: b.z - tb.z * h }), P(b)]));
+    }
+    edges.push(rc.makeLine(P(pts[last]), P(pts[0])));
+    return rc.assembleWire(edges);
+  };
+  let solid;
+  try {
+    const shaft = rc.loft([...neck.sections, neck.tail].map(wireOf), { ruled: false });
+    const heel = prism(drawVerts(rc, fitArcs(neck.heel, 0.01, true)), neck.heelBottom, neck.top);
+    solid = shaft.fuse(heel);
+  } catch (err) {
+    throw new Error('The neck could not be built from these settings. Try a blend length nearer the starting value, or a fullness nearer 2.');
+  }
+  const checker = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
+  const valid = checker.IsValid();
+  checker.delete();
+  const volume = rc.measureVolume(solid);
+  if (!valid || (expectVolume > 0 && Math.abs(volume / expectVolume - 1) > 0.01)) {
+    throw new Error('The 3D model of the neck did not come out right, so it was not saved. Try a blend length nearer the starting value, or a fullness nearer 2.');
+  }
+  return { shape: solid, volume, valid };
+}

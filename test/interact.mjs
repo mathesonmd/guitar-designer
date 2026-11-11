@@ -658,6 +658,37 @@ await step('a bevel around the top edge: drag a diamond for width, give a point 
   return `${count} diamonds; one dragged to ${s1.outline.nodes[low].bw.toFixed(1)} mm; STEP ${(fs.statSync(edge).size / 1024).toFixed(0)} KB`;
 });
 
+await step('the neck\'s back is shaped from a thickness profile and saved as a 3D model that sits in the pocket', async () => {
+  await tab('Design'); await settle(400); await openSec('neck');
+  const b0 = (await state()).neck.back;
+  assert(b0.profile === 'standardThin' && Math.abs(b0.t1 - 20.32) < 1e-6, 'starts on the Standard Thin profile, 0.800 in at the 1st fret');
+  await page.selectOption('#nb-profile', 'roundback59');
+  const b1 = (await state()).neck.back;
+  near(b1.t1, 0.86 * 25.4, 1e-6, '1st fret'); near(b1.t12, 0.96 * 25.4, 1e-6, '12th fret');
+  await setField('#nb-t1', '21 mm');
+  assert(await page.locator('#nb-profile').inputValue() === 'own', 'typing a thickness shows it is your own, not the published profile');
+  await page.selectOption('#nb-profile', 'standardThin');
+  await setField('#nb-full', '2.4');
+  const b2 = (await state()).neck.back;
+  assert(Math.abs(b2.t1 - 20.32) < 1e-6 && Math.abs(b2.fullness - 2.4) < 1e-6, 'profile restored, fullness stored');
+  const note = await page.locator('section[data-sec="neck"]').innerText();
+  assert(/Not built yet: the headstock and volute, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  await tab('3D'); await settle(1500);
+  await page.click('.viewopts button:has-text("Back")'); await settle(600);
+  await page.screenshot({ path: path.join(out, '3d-neck-back.png') });
+  await page.click('.viewopts button:has-text("Angle")');
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
+  assert(/3D model of the neck/i.test(await dlg.innerText()) && /The neck ends square at the nut/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
+  files.neck = await saveDownload(() => dlg.locator('button:has-text("Save neck model (.step)")').click(), 120000);
+  assert(fs.readFileSync(files.neck, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file of the neck saved');
+  await dlg.locator('[data-k="neck-status"]:has-text("neck.step")').waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await tab('Design'); await openSec('neck'); await setField('#nb-full', '2');
+  return `neck STEP ${(fs.statSync(files.neck).size / 1024).toFixed(0)} KB`;
+});
+
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {
   await tab('Templates'); await settle(800);
   const vb = () => page.locator('.sheetwrap svg').evaluate((el) => el.getAttribute('viewBox').split(' ').map(Number));

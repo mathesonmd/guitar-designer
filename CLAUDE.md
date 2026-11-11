@@ -25,9 +25,9 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 69 geometry and export tests (28 of them build the CAD solid)
+    npm test                  # 72 geometry and export tests (29 of them build the CAD solid)
     npm run build
-    node test/interact.mjs    # 33 click-through steps in headless Chromium
+    node test/interact.mjs    # 34 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
 
 All must pass. Add a test for every new behavior and for every bug fixed. The two browser scripts need
@@ -82,6 +82,11 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   solids, wrong volumes and a crash on some outlines, and took about 20 seconds when it worked. The 3D
   view derives the body with a coarser outline (tol 0.1) than the files do: anything that measures
   against the outline polygon must allow for that, or the picture and the file will differ.
+- The neck (`src/model/neck.js`) is cross-sections along its length; the CAD solid lofts through them
+  and must match their volume within 1%. Draw every cross-section with the same pieces, point for point,
+  or the loft fails. After dozens of builds in one process the engine starts failing on shapes it
+  normally builds (the neck tests have their own file for that reason); the dialog tells people to
+  reload the page.
 - Contours live in `solid.js` as depth functions (`bevelPlane`, `bevelProfile`, `bellyDish`); `step.js`
   builds its cutters from the same profile pieces, so change the math in `solid.js` first. The belly rim
   blend is the one place the two differ on purpose: true rolled radius in CAD, close approximation in the
@@ -116,10 +121,12 @@ with a purfling channel along its inner line; live build checks; 3D view; templa
 offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; 2D CNC vectors for
 pockets and holes, in millimeters or inches; a 3D model of the body as STEP (true solid) or STL (fine
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
-roundover; a binding channel; hole depths entered per hardware.
+roundover; a binding channel; hole depths entered per hardware; the neck's shaft and heel as a 3D model
+(thickness from Warmoth's published profiles, a flat top for the fretboard, a heel that fills the pocket).
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
-carved tops, a 3D neck (profile, heel, volute, headstock), STEP roundovers larger than the outline's
+carved tops, the neck's headstock and volute, its truss rod channel and heel screw holes, a sculpted
+heel on the body, STEP roundovers larger than the outline's
 tightest outside curve, the purfling channel in the STEP and STL (it is in the 3D picture and the CNC
 vectors only), the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
 
@@ -137,11 +144,12 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- Whether the edge bevel's controls do what he wants: width and depth at each point, tapering to nothing,
-  the roll, purfling. (He confirmed in Aspire that the rolled bevel is smooth, with no banding.)
+- The neck: whether the shaft-and-heel shape is right (half-ellipse back, straight thickness between the
+  1st and 12th frets, blend into a square heel), and what the headstock should be: flat like a Fender or
+  angled with a volute, and how its outline is drawn.
 - He would adjust the arm bevel and belly cut further but says they will work.
-- Whether centering now lines the vectors up exactly with the model in Aspire, and whether inch files
-  import at the right size.
+- Whether inch files import at the right size. (He confirmed in Aspire: the tapered edge bevel, the
+  purfling lines, and that centering lines the vectors up with the model.)
 
 ## Things that are easy to get wrong
 

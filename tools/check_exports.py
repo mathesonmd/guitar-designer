@@ -399,5 +399,16 @@ for f in glob.glob(D + '/*-cnc-vectors-inch.zip'):
     heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
     check(len(sc) == 4 and all(abs(p['r'] - r_in) < 1e-5 for p in sc) and any(abs(p['c'][0] - sa / IN) < 1e-4 and abs(p['c'][1] - s0 / IN) < 1e-4 for p in sc), 'inch pack: neck screw circles are %.4f in across, at the neck\'s positions in inches' % (2 * r_in))
     check(any(p['layer'] == 'TOP_NECK_POCKET_%.4fIN_DEEP' % (nk['pocketDepth'] / IN) for p in ipolys), 'inch pack: the neck pocket layer gives its depth in inches (%.4f)' % (nk['pocketDepth'] / IN))
+# ---------- STEP (3D model of the neck) ----------
+for f in glob.glob(D + '/*-neck.step'):
+    N = parse_step(open(f).read()); nkinds = [k for k, _ in N.values()]
+    print('STEP', os.path.basename(f), len(N), 'entities')
+    check(nkinds.count('MANIFOLD_SOLID_BREP') == 1, 'the neck is one solid')
+    vs = [nums(N[refs(a)[0]][1])[-3:] for k, a in N.values() if k == 'VERTEX_POINT']
+    nk = design['neck']; T = design['body']['thickness']
+    ys = [v[1] for v in vs]; zs = [v[2] for v in vs]; xs = [v[0] for v in vs]
+    check(abs(max(ys) - nk['scale']) < 1e-4 and abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4, 'it runs from the nut (one scale length from the scale line) to the end of the heel, %.2f mm' % (max(ys) - min(ys)))
+    check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4 and abs(min(zs) - (T - nk['pocketDepth'])) < 1e-4, 'its flat top stands %.3f mm above the body and its heel sits on the pocket floor' % nk['heelStandProud'])
+    check(abs((max(xs) - min(xs)) - nk['heelWidth']) < 1e-3, 'the heel is the pocket\'s width, %.3f mm' % nk['heelWidth'])
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)
