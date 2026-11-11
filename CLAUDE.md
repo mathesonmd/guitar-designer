@@ -127,7 +127,8 @@ vectors only), the binding channel on the routing templates, whole-guitar balanc
 not been opened in LightBurn, Vectric or Fusion (the owner opened a STEP file in his 3D printing slicer,
 where it measured exactly right: 326.00 x 472.74 x 44.45 mm, and the STL in Vectric Aspire 12.5, where it
 showed the same size and clean pockets, and the millimeter CNC vector files there too: layers, dotted
-layer names and true circles all came through; inch files have only been re-read by our own checker);
+layer names and true circles all came through; he also looked at the arm bevel, belly cut and rolled edge
+bevel there and found them smooth; inch files have only been re-read by our own checker);
 the 3D engine has never been fetched from the real CDN, only from a local copy in the tests; the published artifact has not been opened signed in;
 touch gestures, Safari and Firefox are untried.
 
@@ -136,8 +137,8 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- Whether the reworked edge bevel is smooth in Aspire (his first sample came out wavy) and whether its
-  controls do what he wants: width and depth at each point, tapering to nothing, the roll, purfling.
+- Whether the edge bevel's controls do what he wants: width and depth at each point, tapering to nothing,
+  the roll, purfling. (He confirmed in Aspire that the rolled bevel is smooth, with no banding.)
 - He would adjust the arm bevel and belly cut further but says they will work.
 - Whether centering now lines the vectors up exactly with the model in Aspire, and whether inch files
   import at the right size.
