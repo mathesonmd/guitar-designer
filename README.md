@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 75 geometry and export tests (Node, no browser)
+    npm test               # 77 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -160,10 +160,19 @@ CAD solid; the 3D view draws the same cross-sections.
 - The headstock is a flat slab tilted back from the nut, to an outline drawn in the app. The outline is
   drawn flat, at its true shape, above the nut on the drawing, and edits like the body outline; its two
   ends are pinned to the corners of the nut (`outline.open`).
-- The volute: behind the nut the back deepens by the volute's height over its length, carries on past
-  the nut at that depth until it is inside the headstock, and is cut off level with the headstock's face.
-- The neck's volume is worked out slice by slice across the neck, with the headstock's slice merged into
-  the back's wherever they overlap. The CAD solid must match it within 1.5% or it is not saved.
+- The neck turns into the headstock as one carved shape. Seen from the side, the back's line bends from
+  the neck's line into the headstock's, starting a third of the transition length behind the nut. Past
+  the nut the cross-sections lean back a little more each time (all their planes pass through one line
+  45 mm below the nut, so none cross inside the wood), widen with the outline and square up; at the end of
+  the transition length the section is the slab's own, and the slab takes over.
+- The volute is extra wood on the back's line, highest under the nut: smooth (a rounded hump) or peaked
+  (a crest across the back under the nut). The peaked one is not a narrow dart: across the neck it is as
+  round as the neck's back.
+- In the CAD solid the shaft and the transition are two smooth surfaces that share the cross-section at
+  the nut and are sewn there (fusing them took 7 seconds; sewing takes under half a second).
+- The neck's volume is the shaft by its cross-sections, the transition as the closed shape its sections
+  make when joined by straight lines, and the slab's area times its thickness. The CAD solid must match
+  it within 1.5% or it is not saved.
 - Not built: a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
 
 ## Not built yet

@@ -188,8 +188,9 @@ export default function Model3DDialog({ design, onClose, toast }) {
             <li>The back: {both(g.neck.d1)} of wood at the 1st fret and {both(g.neck.d12)} at the 12th, blending over {both(g.neck.blend)} into the heel.</li>
             <li>The heel: a block {both(g.neck.heelDepth)} deep with the pocket’s own outline. It is {both(g.neck.length)} from the nut to the end of the heel.</li>
             {g.neck.head && <li>The headstock: {both(g.neck.head.thick)} thick, tilted back {+((g.neck.head.ang * 180) / Math.PI).toFixed(1)}° from the nut, {both(g.neck.head.length)} long, to the outline you drew.</li>}
+            {g.neck.head && <li>The neck turns into the headstock over the {both(g.neck.head.reach)} past the nut.</li>}
             {g.neck.head && (g.neck.head.rise > 0
-              ? <li>The volute: the back swells out {both(g.neck.head.rise)} over the {both(g.neck.head.run)} behind the nut.</li>
+              ? <li>The volute: {g.neck.head.peaked ? 'peaked' : 'smooth'}, standing out {both(g.neck.head.rise)} under the nut, rising over the {both(g.neck.head.run)} behind it.</li>
               : <li>No volute.</li>)}
           </ul>
           <p className="note"><b>Not in the file:</b> tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes.{g.neck.head ? '' : ' The headstock is switched off, so the neck ends square at the nut.'}</p>

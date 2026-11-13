@@ -79,36 +79,93 @@ test('headstock: a slab tilted back from the nut, its outline at true shape with
   assert.ok(Math.abs(Math.hypot(under.y - b.y, under.z - b.z) - 15) < 1e-9 && under.z < b.z, 'its back is one thickness below its face, square to it');
 });
 
-test('volute: the back swells out behind the nut, carries on past it, and is cut off level with the headstock\'s face', () => {
-  const d = defaultDesign(), g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head;
-  const off = defaultDesign(); off.neck.head.on = false;
-  const bare = derive(off, { tol: 0.005 }).neck;
-  assert.ok(Math.abs(n.at(g.nutY).depth - (bare.at(g.nutY).depth + 4)) < 1e-9, 'deeper by the volute\'s height at the nut');
-  assert.ok(Math.abs(n.at(g.nutY - 40).depth - bare.at(g.nutY - 40).depth) < 1e-9, 'and not at all one volute length behind it');
-  const mid = n.at(g.nutY - 20).depth - bare.at(g.nutY - 20).depth;
-  assert.ok(Math.abs(mid - 2) < 1e-9, 'half way there, half the height');
-  const past = n.at(g.nutY + 10);
-  assert.ok(Math.abs(past.depth - (n.d1 + 4)) < 1e-9 && Math.abs(past.half * 2 - d.neck.nutWidth) < 1e-9);
-  const lid = -10 * Math.tan(h.ang);
-  assert.ok(past.cut.every((p) => p.z <= lid + 1e-9) && past.cut.some((p) => Math.abs(p.z - lid) < 1e-9), 'nothing stands above the headstock\'s face');
-  assert.ok(h.past > (n.d1 + 4 - h.thick / h.cos) / h.tan, 'it runs on until it is inside the headstock');
+test('neck into headstock: one carved shape that starts as the neck\'s own end and finishes as the flat slab', () => {
+  const d = defaultDesign(), g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head, S = h.sections;
+  assert.ok(h.reach === 45 && Math.abs(h.behind - 15) < 1e-9, 'the starting transition length, and the turn starting a third of it behind the nut');
+  // at the nut it is the shaft's last cross-section, point for point
+  const nut = n.sections[0];
+  assert.ok(Math.abs(nut.y - g.nutY) < 1e-9 && S[0].p3.every((p, i) => Math.hypot(p[0] - nut.p3[i][0], p[1] - nut.p3[i][1], p[2] - nut.p3[i][2]) < 1e-6));
+  // at the end of the transition it is the slab's own section: as thick, as wide as the outline there, all but square
+  const end = S[S.length - 1], w = h.widths(45);
+  assert.ok(end.v === 45 && end.depth === h.thick && end.n > 23.9 && Math.abs(end.left - w.l) < 1e-9 && Math.abs(end.right - w.r) < 1e-9);
+  assert.ok(end.p3.every((p) => { const v = (p[1] - g.nutY) * h.cos - (p[2] - n.top) * h.sin; return Math.abs(v - 45) < 1e-9; }), 'and it lies square to the headstock\'s face');
+  assert.ok(Math.abs(Math.min(...h.slab.map((p) => p.y)) - 45) < 1e-9 && Math.abs(Math.max(...h.slab.map((p) => p.y)) - h.length) < 1e-9, 'the slab takes over exactly there');
+  // every section's top edge lies on the headstock's face, and the sections widen and square up steadily
+  for (let i = 0; i < S.length; i++) {
+    const a = S[i].p3[0], b = S[i].p3[S[i].p3.length - 1];
+    assert.ok(Math.abs(a[2] - h.faceZ(a[1])) < 1e-9 && Math.abs(b[2] - h.faceZ(b[1])) < 1e-9 && Math.abs(a[1] - b[1]) < 1e-12);
+    if (i) assert.ok(S[i].n > S[i - 1].n && S[i].left >= S[i - 1].left - 1e-9 && S[i].v > S[i - 1].v);
+  }
+  // no two neighboring sections cross inside the wood: each point moves toward the headstock from one to the next
+  for (let i = 1; i < S.length; i++) assert.ok(S[i].p3.every((p, j) => p[1] > S[i - 1].p3[j][1] - 1e-9), 'section ' + i);
+  // seen from the side, the back runs from the neck's line to the headstock's line with no step and no kink
   const flat = defaultDesign(); flat.neck.head.voluteHeight = 0;
-  assert.ok(Math.abs(derive(flat, { tol: 0.005 }).neck.at(g.nutY).depth - bare.at(g.nutY).depth) < 1e-9, 'a height of 0 leaves the volute off');
+  const f = derive(flat, { tol: 0.005 }).neck, fh = f.head;
+  assert.ok(Math.abs(fh.backZ(g.nutY - 15) - (f.top - f.d1)) < 1e-9 && Math.abs((fh.backZ(g.nutY - 15) - fh.backZ(g.nutY - 15.01)) / 0.01) < 1e-3, 'it leaves the neck\'s line level');
+  const far = g.nutY + fh.ahead;
+  assert.ok(Math.abs(fh.backZ(far) - (f.top - fh.ahead * fh.tan - fh.thick / fh.cos)) < 1e-9, 'and arrives on the headstock\'s back');
+  for (let y = g.nutY - 20; y < far + 5; y += 0.25) {
+    const k = (fh.backZ(y + 0.25) - fh.backZ(y)) / 0.25 - (fh.backZ(y) - fh.backZ(y - 0.25)) / 0.25;
+    assert.ok(Math.abs(k) < 0.01, `a kink in the back at ${(y - g.nutY).toFixed(2)} mm from the nut`);
+  }
 });
 
-test('headstock CAD solid: sound, and the same volume as slices across it give, for a range of angles, volutes and outlines', () => {
+test('volute: extra wood highest under the nut, smooth or peaked, and none at a height of 0', () => {
+  const make = (change) => { const d = defaultDesign(); d.neck.head = { ...d.neck.head, ...change }; return derive(d, { tol: 0.005 }); };
+  const g = make({}), n = g.neck, none = make({ voluteHeight: 0 }).neck, peak = make({ voluteStyle: 'peak' }).neck;
+  const off = defaultDesign(); off.neck.head.on = false;
+  const bare = derive(off, { tol: 0.005 }).neck;
+  const extra = (a, y) => none.head.backZ(y) - a.head.backZ(y);
+  assert.ok(Math.abs(extra(n, g.nutY) - 4) < 1e-9 && Math.abs(extra(peak, g.nutY) - 4) < 1e-9, 'its full height under the nut, either shape');
+  assert.ok(Math.abs(n.at(g.nutY).depth - none.at(g.nutY).depth - 4) < 1e-9, 'and the neck\'s cross-section there is deeper by that much');
+  assert.ok(Math.abs(n.at(g.nutY - 40).depth - bare.at(g.nutY - 40).depth) < 1e-9, 'none of it one volute length behind the nut');
+  assert.ok(Math.abs(extra(n, g.nutY - 20) - 2) < 1e-9, 'half way there, half the height');
+  assert.ok(Math.abs(extra(n, g.nutY + n.head.ahead)) < 1e-9 && extra(n, g.nutY + n.head.ahead / 2) > 1.9, 'and it has gone by the end of the transition');
+  for (let y = g.nutY - 39; y < g.nutY + n.head.ahead; y += 1) assert.ok(extra(n, y) > 0 && extra(n, y) <= 4 + 1e-9 && extra(peak, y) <= extra(n, y) + 1e-9, 'the peaked one is the slimmer of the two');
+  // smooth: level over the top. Peaked: a crest, the back falling away at an angle on both sides of the nut
+  const turn = (a) => (extra(a, g.nutY + 1e-3) - extra(a, g.nutY)) / 1e-3 - (extra(a, g.nutY) - extra(a, g.nutY - 1e-3)) / 1e-3;
+  assert.ok(Math.abs(turn(n)) < 0.01, 'smooth has no crest');
+  assert.ok(turn(peak) < -0.3, `peaked has one (the back turns by ${turn(peak).toFixed(2)} there)`);
+  assert.ok(Math.abs(none.at(g.nutY - 40).depth - bare.at(g.nutY - 40).depth) < 1e-9);
+});
+
+test('headstock CAD solid: sound, and the same volume as its cross-sections give, for a range of angles, volutes and outlines', () => {
   const off = defaultDesign(); off.neck.head.on = false;
   const bare = derive(off, { tol: 0.005 }).neck.volume;
-  const cases = [['starting headstock', {}], ['17 degrees', { angle: 17 }], ['10 degrees, thinner', { angle: 10, thickness: 13 }], ['no volute', { voluteHeight: 0 }], ['big volute', { voluteHeight: 8, voluteLength: 60 }],
+  const cases = [['starting headstock', {}], ['peaked volute', { voluteStyle: 'peak' }], ['17 degrees', { angle: 17 }], ['10 degrees, thinner', { angle: 10, thickness: 13 }], ['no volute', { voluteHeight: 0 }], ['big peaked volute', { voluteHeight: 8, voluteLength: 60, voluteStyle: 'peak' }],
+    ['25 degrees, short transition', { angle: 25, transition: 20 }], ['long transition, thick', { transition: 80, thickness: 19 }],
     ['lopsided outline', (d) => { const ns = d.neck.head.outline.nodes; ns[2] = { ...ns[2], x: -55, y: 120 }; ns[4] = { ...ns[4], x: 15, y: 210 }; }]];
   for (const [name, change] of cases) {
     const d = defaultDesign();
     if (typeof change === 'function') change(d); else d.neck.head = { ...d.neck.head, ...change };
     const n = derive(d, { tol: 0.005 }).neck, r = buildNeckSolid(rc, oc, n, { expectVolume: n.volume });
     assert.equal(r.valid, true, name);
-    assert.ok(pct(r.volume, n.volume) < 0.5, `${name}: volume differs by ${pct(r.volume, n.volume).toFixed(3)}%`);
+    assert.ok(pct(r.volume, n.volume) < 0.3, `${name}: volume differs by ${pct(r.volume, n.volume).toFixed(3)}%`);
     // the headstock adds about its outline's area times its thickness
     const area = Math.abs(n.head.poly.reduce((a, p, i) => { const q = n.head.poly[(i + 1) % n.head.poly.length]; return a + p.x * q.y - q.x * p.y; }, 0)) / 2;
     assert.ok(Math.abs((n.volume - bare) / (area * n.head.thick) - 1) < 0.08, `${name}: the headstock adds ${((n.volume - bare) / 1000).toFixed(1)} cm3 against ${((area * n.head.thick) / 1000).toFixed(1)} for its slab alone`);
+  }
+});
+
+test('the saved transition is the shape the 3D view draws: the CAD surface stays within 0.4 mm of the cross-sections', () => {
+  for (const [name, change] of [['smooth volute', {}], ['peaked volute', { voluteStyle: 'peak' }], ['25 degrees, short transition', { angle: 25, transition: 20 }]]) {
+    const d = defaultDesign(); d.neck.head = { ...d.neck.head, ...change };
+    const g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head, r = buildNeckSolid(rc, oc, n, { expectVolume: n.volume });
+    const { vertices: V } = r.shape.mesh({ tolerance: 0.05, angularTolerance: 0.3 });
+    const fine = []; for (let v = 0; v <= h.reach + 1e-9; v += 0.5) fine.push(h.at(v).p3);
+    let worst = 0, count = 0;
+    for (let i = 0; i < V.length; i += 3) {
+      const p = [V[i], V[i + 1], V[i + 2]], v = (p[1] - g.nutY) * h.cos - (p[2] - n.top) * h.sin, w = -(p[1] - g.nutY) * h.sin - (p[2] - n.top) * h.cos;
+      if (p[1] < g.nutY + 1 || v > h.reach - 1 || w < 0.5) continue; // the back and sides of the transition, past the nut
+      count++;
+      let best = 1e9;
+      for (const s of fine) for (let j = 0; j < s.length - 1; j++) {
+        const a = s[j], b = s[j + 1], dx = b[0] - a[0], dy = b[1] - a[1], dz = b[2] - a[2];
+        const t = Math.max(0, Math.min(1, ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy + (p[2] - a[2]) * dz) / (dx * dx + dy * dy + dz * dz || 1)));
+        best = Math.min(best, Math.hypot(p[0] - a[0] - t * dx, p[1] - a[1] - t * dy, p[2] - a[2] - t * dz));
+      }
+      worst = Math.max(worst, best);
+    }
+    assert.ok(count > 500 && worst < 0.4, `${name}: ${count} points, the farthest ${worst.toFixed(3)} mm from the intended surface`);
   }
 });

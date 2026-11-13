@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 75 geometry and export tests (30 of them build the CAD solid)
+    npm test                  # 77 geometry and export tests (31 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 34 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -101,6 +101,12 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   The drawing edits whichever outline the selection names (`sel.of === 'head'`); the headstock's points
   are stored from the nut line and shown `g.nutY` higher.
   He said the first neck models "look really good for a first try".
+- He called the first headstock "unusable": a slab stuck on a shaft, "glued to the other with no shaping".
+  The neck must turn into the headstock as one carved shape (`head.sections` in `neck.js`: the back's
+  side-view line bends from one into the other, the cross-sections widen with the outline and square up).
+  He also wants a peak under the nut as well as a smooth volute, and says a Fender neck is "more of a
+  transition to the headstock shape". Look at the back of the headstock in the 3D view ("Back of
+  headstock") before sending him any neck change: the first one was sent checked by numbers only.
 - Electric Herald is a collection of other people's drawings, mostly 1:1 PDFs, "left intact with respect
   to original publishers", with accuracy not guaranteed and no license granting reuse. Do not bundle its
   files or take built-in numbers from them. People can load their own downloads as reference overlays.
@@ -131,7 +137,8 @@ pockets and holes, in millimeters or inches; a 3D model of the body as STEP (tru
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
 roundover; a binding channel; hole depths entered per hardware; the neck as a 3D model: shaft and heel
 (thickness from Warmoth's published profiles, a flat top for the fretboard, a heel that fills the pocket)
-and an angled headstock with a volute, its outline drawn in the app.
+and an angled headstock, its outline drawn in the app, with a carved transition from the neck and a smooth or
+peaked volute.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
 carved tops, a flat (unangled) headstock, tuner holes, the nut slot, the neck's truss rod channel and
@@ -157,7 +164,9 @@ touch gestures, Safari and Firefox are untried.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
 - Whether the demo copies of the app work for him (the artifact, and `dist/index.html` opened from disk).
-- The headstock: whether the volute's shape is right, and his numbers for angle, thickness and volute.
+- The headstock: whether the reworked transition and the two volutes look right (and whether "peak" means
+  a crest across the back, as built, or a narrow dart), and his numbers for angle, thickness, transition
+  and volute.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.

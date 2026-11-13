@@ -342,41 +342,45 @@ export function buildNeckSolid(rc, oc, neck, { expectVolume } = {}) {
   // arriving along the directions of the curve there.
   const STEP = 3; // every third point of the section starts a new piece
   const wireOf = (sec) => {
-    const pts = sec.pts, last = pts.length - 1, P = (p) => [p.x, sec.y, neck.top + p.z];
-    const dir = (i) => { const a = pts[Math.max(0, i - 1)], b = pts[Math.min(last, i + 1)], l = Math.hypot(b.x - a.x, b.z - a.z) || 1; return { x: (b.x - a.x) / l, z: (b.z - a.z) / l }; };
+    const P = sec.p3, last = P.length - 1;
+    const dir = (i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(last, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1; return [(b[0] - a[0]) / l, (b[1] - a[1]) / l, (b[2] - a[2]) / l]; };
     const edges = [];
     for (let i = 0; i < last; i += STEP) {
-      const j = Math.min(last, i + STEP), a = pts[i], b = pts[j], ta = dir(i), tb = dir(j), h = Math.hypot(b.x - a.x, b.z - a.z) / 3;
-      edges.push(rc.makeBezierCurve([P(a), P({ x: a.x + ta.x * h, z: a.z + ta.z * h }), P({ x: b.x - tb.x * h, z: b.z - tb.z * h }), P(b)]));
+      const j = Math.min(last, i + STEP), a = P[i], b = P[j], ta = dir(i), tb = dir(j), h = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 3;
+      edges.push(rc.makeBezierCurve([a, a.map((c, k) => c + ta[k] * h), b.map((c, k) => c - tb[k] * h), b]));
     }
-    edges.push(rc.makeLine(P(pts[last]), P(pts[0])));
+    edges.push(rc.makeLine(P[last], P[0]));
     return rc.assembleWire(edges);
   };
   let solid;
   try {
-    let shaft = rc.loft([...neck.sections, neck.tail].map(wireOf), { ruled: false });
+    const along = [...neck.sections, neck.tail].map(wireOf);
+    let shaft;
     const heel = prism(drawVerts(rc, fitArcs(neck.heel, 0.01, true)), neck.heelBottom, neck.top);
     if (neck.head) {
       const hd = neck.head, deg = (hd.ang * 180) / Math.PI;
-      // shapes drawn flat on the headstock's face, then tilted back about the nut line and moved to the nut
-      const tilt = (shape) => shape.rotate(-deg, [0, 0, 0], [1, 0, 0]).translate([0, neck.sections.find((q) => q.y <= neck.nutY + 1e-9).y, neck.top]);
-      const span = 2 * (hd.length + 60);
-      // past the nut, everything above the headstock's face comes off the neck's back
-      const above = tilt(rc.drawRoundedRectangle(span, span).translate(0, span / 2).sketchOnPlane('XY', 0).extrude(span));
-      shaft = shaft.cut(above);
-      const slab = tilt(drawVerts(rc, fitArcs(hd.poly, 0.01, true)).sketchOnPlane('XY', -hd.thick).extrude(hd.thick));
+      // The transition is a second smooth surface, from the neck's own end at the nut to the headstock's
+      // square section. It starts on the very outline the shaft ends on, so the two skins are sewn there
+      // into one closed piece, and a peaked volute keeps its crest.
+      const past = [...hd.sections, hd.tail].map(wireOf);
+      shaft = rc.makeSolid([rc.makeFace(along[along.length - 1]), rc.loft(along, { ruled: false }, true), rc.loft(past, { ruled: false }, true), rc.makeFace(past[past.length - 1])]);
+      oc.BRepLib.OrientClosedSolid(shaft.wrapped);
+      if (!(rc.measureVolume(shaft) > 0)) throw new Error('inside out');
+      // the slab, drawn flat on the headstock's face, then tilted back about the nut line and moved to the nut
+      const slab = drawVerts(rc, fitArcs(hd.slab, 0.01, true)).sketchOnPlane('XY', -hd.thick).extrude(hd.thick)
+        .rotate(-deg, [0, 0, 0], [1, 0, 0]).translate([0, neck.nutY, neck.top]);
       shaft = shaft.fuse(slab);
-    }
+    } else shaft = rc.loft(along, { ruled: false });
     solid = shaft.fuse(heel);
   } catch (err) {
-    throw new Error('The neck could not be built from these settings. Try a blend length, a fullness or a volute nearer the starting values, or a simpler headstock outline.');
+    throw new Error('The neck could not be built from these settings. Try a blend length, a fullness, a volute or a transition length nearer the starting values, or a simpler headstock outline.');
   }
   const checker = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
   const valid = checker.IsValid();
   checker.delete();
   const volume = rc.measureVolume(solid);
   if (!valid || (expectVolume > 0 && Math.abs(volume / expectVolume - 1) > 0.015)) {
-    throw new Error('The 3D model of the neck did not come out right, so it was not saved. Try a blend length, a fullness or a volute nearer the starting values, or a simpler headstock outline.');
+    throw new Error('The 3D model of the neck did not come out right, so it was not saved. Try a blend length, a fullness, a volute or a transition length nearer the starting values, or a simpler headstock outline.');
   }
   return { shape: solid, volume, valid };
 }

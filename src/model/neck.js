@@ -16,31 +16,37 @@
 //   - The headstock is a flat slab, tilted back from the nut by its angle. Its outline is drawn flat, at
 //     its true shape, and its two ends are pinned to the corners of the nut. Its face meets the neck's
 //     top along the nut line.
-//   - The volute: behind the nut the neck's back swells out by the volute's height over the volute's
-//     length, and carries on past the nut at that depth until it has sunk into the back of the headstock.
-//     Past the nut, everything above the headstock's face is cut away.
+//   - The neck turns into the headstock as one carved shape, not two parts stuck together. Seen from the
+//     side, the line of the neck's back bends smoothly into the line of the headstock's back, starting a
+//     third of the transition length behind the nut and finishing one transition length past it. Over
+//     that same length past the nut the cross-section widens with the headstock's outline and squares up,
+//     from the neck's round back to the headstock's flat one.
+//   - The volute is extra wood on that line, highest under the nut. It rises over the volute's length
+//     behind the nut and falls away over the transition length past it. "Smooth" is a rounded hump;
+//     "peaked" comes to a crest across the back, under the nut.
+//   - Past the transition the headstock is the plain slab.
 //
 // Both the 3D picture and the CAD solid are built from `sections`: cross-sections at stations along the
-// neck, each a closed outline in the plane across the neck.
+// neck, each a closed outline in a plane across the neck (`p3` holds its points in space).
 //
 // Frame: the body's own. x across (0 on the centerline), y along (toward the nut), z up from the body's
 // back. The glue face sits at z = body thickness + how far the heel stands proud.
 import { fretDistance } from '../core/fret.js';
 import { signedArea } from '../core/poly.js';
 import { flattenNodes } from '../core/path.js';
-import { union, regionArea } from '../core/clip.js';
 
 const SQUARE = 24; // fullness of the cross-section where the shaft meets the heel block: all but square
 
 // Half the cross-section's back curve, as points from the bass edge round to the treble edge.
 // |x / halfWidth|^n + |z / depth|^n = 1, a "superellipse": n = 2 is a half ellipse.
-export function backCurve(halfWidth, depth, n, count = 48) {
+// `right` is the treble half-width when the two sides differ (a headstock need not be even).
+export function backCurve(halfWidth, depth, n, count = 48, right = halfWidth) {
   const pts = [];
   for (let i = 0; i <= count; i++) {
     const a = (Math.PI * i) / count, c = Math.cos(a), s = Math.sin(a);
-    pts.push({ x: -halfWidth * Math.sign(c) * Math.abs(c) ** (2 / n), z: -depth * s ** (2 / n) });
+    pts.push({ x: -(c >= 0 ? halfWidth : right) * Math.sign(c) * Math.abs(c) ** (2 / n), z: -depth * s ** (2 / n) });
   }
-  pts[0] = { x: -halfWidth, z: 0 }; pts[count] = { x: halfWidth, z: 0 };
+  pts[0] = { x: -halfWidth, z: 0 }; pts[count] = { x: right, z: 0 };
   return pts;
 }
 
@@ -65,93 +71,123 @@ export function buildNeck(design, g) {
   const mouthHalf = g.pocketHalf(shaftEnd);
   const halfAt = (y) => (y <= shaftEnd ? mouthHalf : nk.nutWidth / 2 + ((mouthHalf - nk.nutWidth / 2) * (g.nutY - y)) / (g.nutY - shaftEnd));
   const toHeel = (y) => { const s = Math.max(0, Math.min(1, (shaftEnd + blend - y) / blend)); return s * s * (3 - 2 * s); };
-  // ---- headstock and volute ----
+  // ---- headstock, transition and volute ----
   const h = nk.head && nk.head.on ? nk.head : null;
-  let head = null;
+  const ease = (u) => { const s = Math.max(0, Math.min(1, u)); return s * s * (3 - 2 * s); };
+  let head = null, zBack = null;
   if (h) {
     const ang = (Math.max(1, Math.min(25, h.angle)) * Math.PI) / 180, sin = Math.sin(ang), cos = Math.cos(ang), tan = sin / cos;
     const thick = Math.max(6, Math.min(30, h.thickness)), rise = Math.max(0, Math.min(15, h.voluteHeight)), run = Math.max(5, Math.min(120, h.voluteLength));
+    const peaked = h.voluteStyle === 'peak';
     // the outline at its true shape, its ends pinned to the corners of the nut
     const nodes = h.outline.nodes.map((q) => ({ ...q })), last = nodes.length - 1;
     nodes[0] = { ...nodes[0], x: -nk.nutWidth / 2, y: 0 }; nodes[last] = { ...nodes[last], x: nk.nutWidth / 2, y: 0 };
     const poly = flattenNodes(nodes, false, 0.02);
     const length = Math.max(...poly.map((p) => p.y));
-    // how far past the nut the neck's back carries on before it is wholly inside the headstock
-    const past = Math.max(8, Math.min(70, (d1 + rise - thick / cos) / tan + 8));
+    // the transition length, measured along the headstock's face from the nut
+    const reach = Math.max(20, Math.min(h.transition, 80, length * 0.6));
+    const behind = reach / 3;                       // the back starts to turn this far behind the nut
+    const ahead = Math.max(5, reach * cos - thick * sin); // and has become the headstock's back this far past it
     // a point of the headstock: x across, v along its face from the nut, w down into it from its face
     const place = (x, v, w) => ({ x, y: g.nutY + v * cos - w * sin, z: top - v * sin - w * cos });
-    head = { ang, sin, cos, tan, thick, rise, run, nodes, poly, length, past, place, faceZ: (y) => top - (y - g.nutY) * tan };
-  }
-  const swell = (y) => { if (!head) return 0; const s = Math.max(0, Math.min(1, (y - (g.nutY - head.run)) / head.run)); return head.rise * s * s * (3 - 2 * s); };
-  const at = (y) => {
-    if (head && y > g.nutY) {
-      // past the nut: the back at the volute's depth, the width of the nut; `cut` is the same outline with
-      // everything above the headstock's face taken off
-      const depth = d1 + head.rise, pts = backCurve(nk.nutWidth / 2, depth, fullness), lid = head.faceZ(y) - top;
-      return { y, half: nk.nutWidth / 2, depth, n: fullness, pts, cut: pts.map((p) => ({ x: p.x, z: Math.min(p.z, lid) })) };
+    // the side view of the back, as a height at each place along the neck
+    const hill = (y) => {
+      if (y <= g.nutY) { const u = Math.max(0, (y - (g.nutY - run)) / run); return peaked ? u * u : ease(u); }
+      const u = Math.max(0, 1 - (y - g.nutY) / ahead); return peaked ? u * u : ease(u);
+    };
+    zBack = (y) => {
+      const zn = top - shaftDepth(Math.min(y, g.nutY)), zh = top - (y - g.nutY) * tan - thick / cos;
+      return zn + ease((y - (g.nutY - behind)) / (behind + ahead)) * (zh - zn) - rise * hill(y);
+    };
+    // the outline's reach to the bass and treble sides at a place along the face
+    const widths = (v) => {
+      if (v <= 1e-9) return { l: nk.nutWidth / 2, r: nk.nutWidth / 2 };
+      let x0 = Infinity, x1 = -Infinity;
+      for (let i = 0, m = poly.length; i < m; i++) {
+        const p = poly[i], q = poly[(i + 1) % m];
+        if ((p.y - v) * (q.y - v) > 0 || p.y === q.y) continue;
+        const x = p.x + ((q.x - p.x) * (v - p.y)) / (q.y - p.y);
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+      }
+      return x1 > x0 ? { l: Math.max(1, -x0), r: Math.max(1, x1) } : { l: nk.nutWidth / 2, r: nk.nutWidth / 2 };
+    };
+    // Cross-sections past the nut. Each lies in a plane across the neck that leans back a little more than
+    // the one before, from upright at the nut to square with the headstock's face; all the leaning planes
+    // pass through one line well below the neck, so no two of them cross inside the wood.
+    const HINGE = 45, fan = HINGE * sin;
+    const station = (v, like) => {
+      const th = v >= fan ? ang : Math.atan2(v * cos, HINGE - v * sin), st = Math.sin(th), ct = Math.cos(th);
+      const oy = g.nutY + v * cos, oz = top - v * sin;
+      const src = like == null ? v : like; // the tail repeats the last section's shape a little farther on
+      let depth;
+      if (src >= reach) depth = thick;
+      else {
+        let lo = 0, hi = 90; // where this plane's centerline meets the back
+        for (let k = 0; k < 50; k++) { const t = (lo + hi) / 2; if (oz - t * ct > zBack(oy - t * st)) lo = t; else hi = t; }
+        depth = (lo + hi) / 2;
+      }
+      const w = widths(src), n = fullness * (SQUARE / fullness) ** ease(src / reach);
+      const pts = backCurve(w.l, depth, n, 48, w.r);
+      return { v, y: oy, half: (w.l + w.r) / 2, left: w.l, right: w.r, depth, n, pts, p3: pts.map((p) => [p.x, oy + p.z * st, oz + p.z * ct]) };
+    };
+    // evenly spaced: uneven spacing makes the smooth CAD surface wander between sections
+    const count = Math.max(8, Math.round(reach / 2.5)), vs = [];
+    for (let k = 0; k < count; k++) vs.push((reach * k) / count);
+    vs.push(reach);
+    const sections = vs.map((v) => station(v));
+    // the slab: the outline from the end of the transition on
+    const slab = [];
+    for (let i = 0, m = poly.length; i < m; i++) {
+      const p = poly[i], q = poly[(i + 1) % m], pin = p.y >= reach, qin = q.y >= reach;
+      if (pin) slab.push(p);
+      if (pin !== qin) slab.push({ x: p.x + ((q.x - p.x) * (reach - p.y)) / (q.y - p.y), y: reach });
     }
-    const s = toHeel(y), base = shaftDepth(y) + swell(y), depth = base + (heelDepth - base) * s;
+    head = { ang, sin, cos, tan, thick, rise, run, peaked, reach, behind, ahead, backZ: zBack, widths, at: (v) => station(v), nodes, poly, slab, length, place, sections, tail: station(reach + 5, reach), faceZ: (y) => top - (y - g.nutY) * tan };
+  }
+  const at = (y) => {
+    const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;
     // fullness climbs steeply at the end, so the neck is round for most of the blend and squares up at the heel
     const n = fullness + (SQUARE - fullness) * s ** 3;
     const half = halfAt(y);
     const pts = backCurve(half, depth, n);
-    return { y, half, depth, n, pts, cut: pts };
+    return { y, half, depth, n, pts, p3: pts.map((p) => [p.x, y, top + p.z]) };
   };
   // (the last station sits a little way inside the heel block, so the two parts of the CAD solid overlap)
   // stations: closer together through the blend, where the shape changes fastest
   const ys = [];
   if (head) {
-    for (let k = 6; k >= 1; k--) ys.push(g.nutY + (head.past * k) / 6);          // past the nut, under the headstock
-    for (let y = g.nutY; y > g.nutY - head.run - 1e-6; y -= head.run / 8) ys.push(y); // the volute, in small steps
-    for (let y = g.nutY - head.run - 20; y > shaftEnd + blend + 1e-6; y -= 20) ys.push(y);
+    const from = g.nutY - Math.max(head.run, head.behind);
+    for (let k = 0; k < 16; k++) ys.push(g.nutY - ((g.nutY - from) * k) / 16); // the volute and the turn, in small steps
+    for (let y = from; y > shaftEnd + blend + 1e-6; y -= 20) ys.push(y);
   } else for (let y = g.nutY; y > shaftEnd + blend + 1e-6; y -= 20) ys.push(y);
   for (let i = 0; i <= 14; i++) ys.push(shaftEnd + blend - (blend * i) / 14);
   const sections = ys.map(at);
-  const tail = { ...at(shaftEnd), y: shaftEnd - 5 };
+  const tail = { ...at(shaftEnd), y: shaftEnd - 5 }; tail.p3 = tail.p3.map((q) => [q[0], shaftEnd - 5, q[2]]);
   // the heel block: the pocket's own outline from its end wall up to where the shaft meets it
   const heel = g.pocketTo(shaftEnd);
-  // volume: the shaft by its cross-sections, plus the heel block, plus the headstock. Where the headstock
-  // and the neck's back overlap, each slice across the neck is the two outlines merged, so nothing counts twice.
-  const areaOf = (pts) => sectionArea(pts);
+  // volume: the shaft by its cross-sections, plus the heel block, plus the headstock (the transition as
+  // the closed shape its cross-sections make when joined by straight lines, and the slab past it)
   const measure = () => {
     let shaft = 0;
-    const from = head ? g.nutY - head.thick * head.sin - 1 : g.nutY; // sections above this are measured with the headstock
-    const run = sections.filter((q) => q.y <= from + 1e-9);
-    if (head) run.unshift(at(from));
-    for (let i = 0; i < run.length - 1; i++) {
-      const a = areaOf(run[i].cut), c = areaOf(run[i + 1].cut);
-      shaft += ((a + c + Math.sqrt(a * c)) / 3) * (run[i].y - run[i + 1].y);
+    for (let i = 0; i < sections.length - 1; i++) {
+      const a = sectionArea(sections[i].pts), c = sectionArea(sections[i + 1].pts);
+      shaft += ((a + c + Math.sqrt(a * c)) / 3) * (sections[i].y - sections[i + 1].y);
     }
     let headVolume = 0;
     if (head) {
-      const yEnd = g.nutY + head.length * head.cos + 1, step = 1;
-      // the headstock's slice at height y: for each depth w into it, the outline's width at that place along the face
-      const slab = (y) => {
-        const L = [], R = [];
-        for (let k = 0; k <= 12; k++) {
-          const w = (head.thick * k) / 12, v = (y - g.nutY + w * head.sin) / head.cos;
-          if (v < 0 || v > head.length) continue;
-          let x0 = Infinity, x1 = -Infinity;
-          for (let i = 0, m = head.poly.length; i < m; i++) {
-            const p = head.poly[i], q = head.poly[(i + 1) % m];
-            if ((p.y - v) * (q.y - v) > 0 || p.y === q.y) continue;
-            const x = p.x + ((q.x - p.x) * (v - p.y)) / (q.y - p.y);
-            if (x < x0) x0 = x; if (x > x1) x1 = x;
-          }
-          if (!(x1 > x0)) continue;
-          const z = -v * head.sin - w * head.cos; // relative to the neck's top, like the sections
-          L.push({ x: x0, y: z }); R.push({ x: x1, y: z });
-        }
-        return L.length > 1 ? [...L, ...R.reverse()] : null;
+      const S = head.sections, m = S[0].p3.length, o = S[0].p3[0];
+      let six = 0;
+      const tri = (a, b, c) => {
+        const ax = a[0] - o[0], ay = a[1] - o[1], az = a[2] - o[2], bx = b[0] - o[0], by = b[1] - o[1], bz = b[2] - o[2], cx = c[0] - o[0], cy = c[1] - o[1], cz = c[2] - o[2];
+        six += ax * (by * cz - bz * cy) - ay * (bx * cz - bz * cx) + az * (bx * cy - by * cx);
       };
-      const slice = (y) => {
-        const polys = [], sl = slab(y);
-        if (sl) polys.push(sl);
-        if (y <= g.nutY + head.past) polys.push(at(y).cut.map((p) => ({ x: p.x, y: p.z })));
-        return polys.length ? regionArea(union(polys, [])) : 0;
-      };
-      let prev = slice(from);
-      for (let y = from + step; y <= yEnd + 1e-9; y += step) { const cur = slice(y); headVolume += ((prev + cur) / 2) * step; prev = cur; }
+      for (let i = 0; i < S.length - 1; i++) {
+        const a = S[i].p3, b = S[i + 1].p3;
+        for (let j = 0; j < m; j++) { const k = (j + 1) % m; tri(a[j], b[j], b[k]); tri(a[j], b[k], a[k]); } // k wraps: the flat top closes it
+      }
+      const first = S[0].p3, end = S[S.length - 1].p3;
+      for (let j = 1; j < m - 1; j++) { tri(first[0], first[j], first[j + 1]); tri(end[0], end[j + 1], end[j]); }
+      headVolume = Math.abs(six) / 6 + Math.abs(signedArea(head.slab)) * head.thick;
     }
     const heelVolume = Math.abs(signedArea(heel)) * heelDepth;
     return { volume: shaft + heelVolume + headVolume, shaftVolume: shaft, heelVolume, headVolume };
