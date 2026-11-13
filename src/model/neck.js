@@ -55,57 +55,78 @@ export function backCurve(halfWidth, depth, n, count = 48, right = halfWidth) {
   return pts;
 }
 
-// A cross-section ready to build from: its two top corners, and between them the back as 49 points
-// spaced evenly along it (24 steps from each side to the crown), with the direction the curve is heading
-// at each. Even spacing matters when the section is nearly square: points spread by angle bunch in the
-// corners and leave the flat between them to sag in the CAD surface.
-//   shift(p)    moves each point of a fine tracing before the 49 are picked (the volute)
+// A cross-section ready to build from: its two top corners, and between them the back as 49 points, with
+// the direction the curve arrives at and leaves each one (`din`, `dout`: they differ only at a crease).
+// From the crown outward each side is: a flat of FLAT_STEPS steps, then OUTER_STEPS steps evenly spaced
+// along the rest of the curve to where the edge begins. The flat is the tongue where there is one, and a
+// bare EDGE wide where there is not, so that every section is made of the same pieces and a tongue's
+// edge is always the same point of every section (which is what keeps that edge a crisp line).
+// Even spacing matters when the section is nearly square: points spread by angle bunch in the corners
+// and leave the flat between them to sag in the CAD surface.
+//   shift(p, s) moves each point of a fine tracing before the points are picked (the volute, the tongue)
 //   to3(p)      places a point in space
 //   limit(q, s) for a point in space on side s (-1 bass, +1 treble): how far out the section may reach
 //               there (the headstock's outline); left out, the section is not trimmed
-// Each side begins with a straight edge from the top corner down to where the back starts: the
-// headstock's sawn edge where the section is trimmed, and a bare EDGE of the curve itself where it is not,
-// so that every section is made of the same pieces.
-const EDGE = 0.05;
-function sampled(left, depth, n, right, shift, to3, limit) {
+//   flat        { l, r, near }: half-widths of the flat, and extra places (distances from the centerline)
+//               to trace finely, where the shape turns sharply
+// Each side ends with a straight edge from where the back stops up to the top corner: the headstock's
+// sawn edge where the section is trimmed, and a bare EDGE of the curve itself where it is not.
+const EDGE = 0.05, FLAT_STEPS = 6, OUTER_STEPS = 18;
+function sampled(left, depth, n, right, shift, to3, limit, flat) {
   const FINE = 300, c = 2 ** (-1 / n); // the curve is traced by x across its crown and by z down its sides
-  const half = (w, sign) => {
-    const run = [];
-    for (let i = 0; i <= FINE; i++) { const x = (c * i) / FINE; run.push({ x: sign * w * x, z: -depth * (1 - x ** n) ** (1 / n) }); }
-    for (let i = 1; i <= FINE; i++) { const z = c * (1 - i / FINE); run.push({ x: sign * w * (1 - z ** n) ** (1 / n), z: -depth * z }); }
-    if (shift) for (const p of run) shift(p);
-    // crown to edge; now cut it short where the edge begins
-    let q = run.map(to3), end = run.length - 1, corner = run[end];
-    const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+  const half = (w, sign, wide, near) => {
+    const base = (x) => ({ x: sign * x, z: -depth * (1 - Math.min(1, x / w) ** n) ** (1 / n) });
+    const moved = (p) => { if (shift) shift(p, sign); return p; };
+    const crown = moved(base(0));
+    // the flat: from the crown out to its edge, kept a little inside the section's own edge
+    let f = Math.max(EDGE, Math.min(wide || 0, w - 4 * EDGE));
+    if (limit) f = Math.max(EDGE, Math.min(f, limit(to3({ x: sign * f, z: crown.z }), sign) - 2 * EDGE));
+    // (a tongue is level right across, so its edge is as deep as its crown)
+    const lip = wide > 0 ? { x: sign * f, z: crown.z } : moved(base(f));
+    // the rest: traced finely from the flat's edge to the section's edge
+    const xs = [];
+    for (let i = 0; i <= FINE; i++) { const x = (c * w * i) / FINE; if (x > f + 1e-9) xs.push(x); }
+    for (const x of near || []) if (x > f + 1e-9 && x < c * w) xs.push(x);
+    xs.sort((a, b) => a - b);
+    const run = [lip, ...xs.map((x) => moved(base(x)))];
+    for (let i = 1; i <= FINE; i++) { const z = c * (1 - i / FINE), x = w * (1 - z ** n) ** (1 / n); if (x > f + 1e-9) run.push(moved({ x: sign * x, z: -depth * z })); }
+    let q = run.map(to3), end = run.length - 1, corner = { x: sign * w, z: 0 }, trimmed = false;
     const cutAt = (i, t) => { // keep up to a point part way along the step from i to i + 1
       const p = { x: run[i].x + (run[i + 1].x - run[i].x) * t, z: run[i].z + (run[i + 1].z - run[i].z) * t };
       run.length = i + 1; run.push(p); q = run.map(to3);
     };
     if (limit) {
       const over = (i) => sign * q[i][0] - limit(q[i], sign);
-      for (let i = 0; i < end; i++) if (over(i + 1) > 0) { const a = over(i), b = over(i + 1); cutAt(i, a >= 0 ? 0 : -a / (b - a)); break; }
+      for (let i = 0; i < end; i++) if (over(i + 1) > 0) { const a = over(i), b = over(i + 1); cutAt(i, a >= 0 ? 0 : -a / (b - a)); trimmed = true; break; }
       end = run.length - 1;
-      if (run.length <= FINE * 2) corner = { x: sign * limit(to3({ x: run[end].x, z: 0 }), sign), z: 0 };
+      if (trimmed) corner = { x: sign * limit(to3({ x: run[end].x, z: 0 }), sign), z: 0 };
     }
-    let back = 0;
-    for (let i = end; i > 0; i--) { const d = dist(q[i], q[i - 1]); if (back + d >= EDGE) { if (run.length > i + 1 || !limit || run.length > FINE * 2) cutAt(i - 1, 1 - (EDGE - back) / d); break; } back += d; }
+    if (!trimmed) { // leave a bare EDGE of the curve as the straight edge
+      let back = 0;
+      for (let i = end; i > 0; i--) { const d = dist(q[i], q[i - 1]); if (back + d >= EDGE) { cutAt(i - 1, 1 - (EDGE - back) / d); break; } back += d; }
+    }
     const len = [0];
     for (let i = 1; i < q.length; i++) len.push(len[i - 1] + dist(q[i], q[i - 1]));
-    const out = [];
-    for (let k = 0, i = 0; k <= 24; k++) {
-      const want = (len[len.length - 1] * k) / 24;
+    const outer = [];
+    for (let k = 0, i = 0; k <= OUTER_STEPS; k++) {
+      const want = (len[len.length - 1] * k) / OUTER_STEPS;
       while (i < q.length - 2 && len[i + 1] < want) i++;
-      const t = Math.max(0, Math.min(1, (want - len[i]) / (len[i + 1] - len[i] || 1))), a = q[i], b = q[i + 1], l = dist(a, b) || 1;
-      out.push({ p: { x: run[i].x + (run[i + 1].x - run[i].x) * t, z: run[i].z + (run[i + 1].z - run[i].z) * t }, p3: a.map((v, j) => v + (b[j] - v) * t), dir: [(b[0] - a[0]) / l, (b[1] - a[1]) / l, (b[2] - a[2]) / l] });
+      const t = Math.max(0, Math.min(1, (want - len[i]) / (len[i + 1] - len[i] || 1))), a = q[i], b = q[i + 1], l = dist(a, b) || 1, dir = [(b[0] - a[0]) / l, (b[1] - a[1]) / l, (b[2] - a[2]) / l];
+      outer.push({ p: { x: run[i].x + (run[i + 1].x - run[i].x) * t, z: run[i].z + (run[i + 1].z - run[i].z) * t }, p3: a.map((v, j) => v + (b[j] - v) * t), a: dir, b: dir });
     }
-    return { out, corner }; // crown to edge, each with the direction of travel toward the edge
+    // the flat itself: straight from the crown to its edge
+    const c3 = to3(crown), l3 = to3(lip), fl = dist(c3, l3) || 1, fdir = l3.map((v, j) => (v - c3[j]) / fl), out = [];
+    for (let k = 0; k < FLAT_STEPS; k++) { const t = k / FLAT_STEPS; out.push({ p: { x: crown.x + (lip.x - crown.x) * t, z: crown.z + (lip.z - crown.z) * t }, p3: c3.map((v, j) => v + (l3[j] - v) * t), a: fdir, b: fdir }); }
+    outer[0].a = fdir; // at the flat's edge the curve arrives along the flat and leaves along the rest
+    return { out: [...out, ...outer], corner }; // crown to edge; a = direction arriving (from the crown side), b = leaving
   };
-  const L = half(left, -1), R = half(right, 1);
+  const L = half(left, -1, flat && flat.l, flat && flat.near), R = half(right, 1, flat && flat.r, flat && flat.near);
   // bass side, round to the crown, round to the treble side; directions all run bass to treble
-  const mid = L.out[0].dir.map((v, j) => R.out[0].dir[j] - v), ml = Math.hypot(...mid) || 1;
-  const all = [...L.out.slice(1).reverse().map((q) => ({ ...q, dir: q.dir.map((v) => -v) })), { ...R.out[0], dir: mid.map((v) => v / ml) }, ...R.out.slice(1)];
+  const neg = (d) => d.map((v) => -v);
+  const all = [...L.out.slice(1).reverse().map((q) => ({ p: q.p, p3: q.p3, din: neg(q.b), dout: neg(q.a) })), { p: R.out[0].p, p3: R.out[0].p3, din: neg(L.out[0].b), dout: R.out[0].b }, ...R.out.slice(1).map((q) => ({ p: q.p, p3: q.p3, din: q.a, dout: q.b }))];
   const pts = [L.corner, ...all.map((q) => q.p), R.corner];
-  return { pts, p3: [to3(L.corner), ...all.map((q) => q.p3), to3(R.corner)], dirs: all.map((q) => q.dir) };
+  return { pts, p3: [to3(L.corner), ...all.map((q) => q.p3), to3(R.corner)], din: all.map((q) => q.din), dout: all.map((q) => q.dout) };
 }
 
 // Area of that cross-section (the back curve closed by the flat top).
@@ -138,7 +159,7 @@ export function buildNeck(design, g) {
     const thick = Math.max(6, Math.min(30, h.thickness)), rise = Math.max(0, Math.min(15, h.voluteHeight)), run = Math.max(5, Math.min(120, h.voluteLength));
     // the volute's length on the headstock side of the nut (it has to be gone by the end of the transition)
     const fallAsked = Math.max(5, Math.min(120, h.voluteAhead));
-    const peaked = h.voluteStyle === 'peak';
+    const peaked = h.voluteStyle === 'peak', flatStyle = h.voluteStyle === 'tongue';
     // the outline at its true shape, its ends pinned to the corners of the nut
     const nodes = h.outline.nodes.map((q) => ({ ...q })), last = nodes.length - 1;
     nodes[0] = { ...nodes[0], x: -nk.nutWidth / 2, y: 0 }; nodes[last] = { ...nodes[last], x: nk.nutWidth / 2, y: 0 };
@@ -163,7 +184,7 @@ export function buildNeck(design, g) {
     // rounded line toward the heel and toward the headstock.
     const bump = (along, across) => {
       const r = Math.hypot(along, across);
-      if (!(rise > 0) || r >= 1) return 0;
+      if (!(rise > 0) || r >= 1 || flatStyle) return 0;
       return rise * (peaked ? (1 - r) ** 1.5 : (1 - r * r) ** 2);
     };
     // the outline's reach to the bass and treble sides at a place along the face
@@ -179,9 +200,11 @@ export function buildNeck(design, g) {
       return x1 > x0 ? { l: Math.max(0, -x0), r: Math.max(0, x1) } : { l: 0, r: 0 };
     };
     // Cross-sections past the nut. Each lies in a plane across the neck that leans back a little more than
-    // the one before, from upright at the nut to square with the headstock's face; all the leaning planes
-    // pass through one line well below the neck, so no two of them cross inside the wood.
-    const HINGE = 45, fan = HINGE * sin, nutHalf = nk.nutWidth / 2;
+    // the one before, from upright at the nut to square with the headstock's face.
+    // The lean grows smoothly from nothing at the nut to the full angle over `fan`, so the sections turn
+    // without a jerk at either end (a jerk shows as a faint line across a flat surface). `fan` is long
+    // enough that no two sections cross anywhere within 30 mm below the face.
+    const fan = Math.min(reach, (1.5 * ang) / 0.03), nutHalf = nk.nutWidth / 2;
     // Each section is drawn wider than the headstock (by up to SPARE at the end of the transition) and
     // then trimmed to the outline, the way a headstock is sawn to its outline and its back carved after:
     // the edge of the headstock is thin at the nut and reaches full thickness as the carve runs out.
@@ -190,8 +213,60 @@ export function buildNeck(design, g) {
       const at = (q[1] - g.nutY) * cos - (q[2] - top) * sin, lim = at <= 0 ? { l: nutHalf, r: nutHalf } : widths(Math.min(at, reach));
       return sign < 0 ? lim.l : lim.r;
     };
+    // The tongue: the flat of the headstock's back carried down the back of the neck to a rounded or
+    // pointed tip, with a crisp edge. It is drawn in plan (x across, s along from the nut): from its tip
+    // behind the nut it widens to most of the neck's width at the nut, then quickly on out to the
+    // headstock's full width, so that the whole back of the headstock is one flat. Behind the nut it stands `rise` out from the crown of the neck's
+    // back; past the nut that fades away as the back becomes the headstock's own. Outside its edge the
+    // surface falls back to the neck's round back through a cove: a quarter circle in section, upright at
+    // the tongue's edge and running out level into the neck.
+    let tongue = null;
+    if (flatStyle) {
+      const tip = -run, atNut = 0.8 * nutHalf, pw = h.tongueTip === 'point' ? 1.3 : 2, cove = Math.max(2, Math.min(25, h.tongueCove));
+      const spread = Math.min(reach, 1.5 * cove); // past the nut it reaches the headstock's full width within this length
+      const halfOf = (sv, sign) => {
+        if (sv <= tip) return 0;
+        if (sv <= 0) { const t = (sv - tip) / -tip; return atNut * (1 - (1 - t) ** pw) ** (1 / pw); }
+        const w = widths(Math.min(sv, reach));
+        return atNut + ((sign < 0 ? w.l : w.r) + SPARE - atNut) * ease(sv / spread);
+      };
+      const edge = [];
+      for (const sign of [-1, 1]) {
+        const side = [];
+        for (let k = 0; k <= 120; k++) { const sv = tip - (tip * k * k) / 14400; side.push([sign * halfOf(sv, sign), sv]); }
+        for (let k = 1; k <= 40; k++) { const sv = (reach * k) / 40; side.push([sign * halfOf(sv, sign), sv]); }
+        side.push([side[side.length - 1][0], reach + 50]);
+        edge.push(side);
+      }
+      const away = (x, sv) => {
+        let best = Infinity;
+        for (const side of edge) for (let i = 0; i < side.length - 1; i++) {
+          const a = side[i], b = side[i + 1];
+          if ((a[1] > sv + cove && b[1] > sv + cove) || (a[1] < sv - cove && b[1] < sv - cove)) continue; // too far along to matter
+          const dx = b[0] - a[0], dy = b[1] - a[1], t = Math.max(0, Math.min(1, ((x - a[0]) * dx + (sv - a[1]) * dy) / (dx * dx + dy * dy || 1)));
+          const d = Math.hypot(x - a[0] - t * dx, sv - a[1] - t * dy);
+          if (d < best) best = d;
+        }
+        return best;
+      };
+      const inside = (x, sv) => sv > tip && x > -halfOf(sv, -1) && x < halfOf(sv, 1);
+      const proud = (sv) => rise * (sv <= 0 ? 1 : 1 - ease(sv / reach));
+      const wall = (u) => (u >= 1 ? 0 : 1 - Math.sqrt(1 - (1 - u) * (1 - u)));
+      // The cove is as wide as set where there is room, and narrower where the tongue's edge is close to
+      // the edge of the neck or headstock (`room` is the half-width there), so that it always runs out
+      // before that edge and never leaves a step on it.
+      const coveAt = (sv, sign, room) => Math.max(0.3, Math.min(cove, room - halfOf(sv, sign) - 0.5));
+      // depth of the back at a place: `round` is the neck's round back there, `crown` its depth on the centerline
+      const depthAt = (x, sv, round, crown, room) => (inside(x, sv) ? crown + proud(sv) : round + (crown + proud(sv) - round) * wall(away(x, sv) / coveAt(sv, x < 0 ? -1 : 1, room)));
+      const flatAt = (sv) => {
+        const l = halfOf(sv, -1), r = halfOf(sv, 1), near = [];
+        for (let k = 1; k <= 30; k++) { const d = (cove * k * k) / 900; near.push(l + d, r + d); }
+        return { l, r, near };
+      };
+      tongue = { tip, cove, spread, atNut, pointed: pw < 2, halfOf, inside, away, proud, coveAt, depthAt, flatAt, from: tip - cove - 1 };
+    }
     const station = (v) => {
-      const th = v >= fan ? ang : Math.atan2(v * cos, HINGE - v * sin), st = Math.sin(th), ct = Math.cos(th);
+      const th = ang * ease(v / fan), st = Math.sin(th), ct = Math.cos(th);
       const oy = g.nutY + v * cos, oz = top - v * sin;
       let base;
       if (v >= reach) base = thick;
@@ -202,16 +277,17 @@ export function buildNeck(design, g) {
       }
       const w = widths(Math.min(v, reach)), spare = SPARE * Math.min(1, v / reach), n = fullness * (SQUARE / fullness) ** ease(v / reach);
       const to3 = (p) => [p.x, oy + p.z * st, oz + p.z * ct];
-      let { pts, p3, dirs } = sampled(w.l + spare, base, n, w.r + spare, (p) => { p.z -= bump(v / fall, Math.abs(p.x) / nutHalf); }, to3, v > 0 ? limit : null);
+      const shift = tongue ? (p) => { p.z = -tongue.depthAt(p.x, v, -p.z, base, p.x < 0 ? w.l : w.r); } : (p) => { p.z -= bump(v / fall, Math.abs(p.x) / nutHalf); };
+      let { pts, p3, din, dout } = sampled(w.l + spare, base, n, w.r + spare, shift, to3, v > 0 ? limit : null, tongue ? tongue.flatAt(v) : null);
       if (v >= reach && !(bump(v / fall, 0) > 0)) {
         // the end of the transition is the flat part's own section, exactly: square corners and a straight back,
         // so the flat part can be stitched on edge to edge
         pts = [{ x: -w.l, z: 0 }];
         for (let i = 0; i <= 48; i++) pts.push({ x: -w.l + ((w.l + w.r) * i) / 48, z: -thick });
         pts.push({ x: w.r, z: 0 });
-        p3 = pts.map(to3); dirs = pts.slice(1, -1).map(() => [1, 0, 0]);
+        p3 = pts.map(to3); din = dout = pts.slice(1, -1).map(() => [1, 0, 0]);
       }
-      return { v, y: oy, left: w.l, right: w.r, spare, base, depth: base + bump(v / fall, 0), n, pts, dirs, p3 };
+      return { v, y: oy, left: w.l, right: w.r, spare, base, depth: tongue ? tongue.depthAt(0, v, base, base, w.r) : base + bump(v / fall, 0), n, pts, din, dout, p3 };
     };
     // a section every STRIP through the transition
     const count = Math.max(8, Math.round(reach / STRIP)), vs = [];
@@ -224,7 +300,9 @@ export function buildNeck(design, g) {
       if (pin) slab.push(p);
       if (pin !== qin) slab.push({ x: p.x + ((q.x - p.x) * (reach - p.y)) / (q.y - p.y), y: reach });
     }
-    head = { ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, sections, faceZ: (y) => top - (y - g.nutY) * tan };
+    // (an outline point lying exactly on that line would otherwise appear twice)
+    for (let i = slab.length - 1; i >= 0; i--) { const a = slab[i], b = slab[(i + 1) % slab.length]; if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) slab.splice(i, 1); }
+    head = { tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, sections, faceZ: (y) => top - (y - g.nutY) * tan };
   }
   const at = (y) => {
     const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;
@@ -238,19 +316,21 @@ export function buildNeck(design, g) {
       const pts = [{ x: -half, z: 0 }];
       for (let i = 0; i <= 48; i++) pts.push({ x: -half + (2 * half * i) / 48, z: -heelDepth });
       pts.push({ x: half, z: 0 });
-      return { y, half, base: heelDepth, depth: heelDepth, n, pts, p3: pts.map(to3), dirs: pts.slice(1, -1).map(() => [1, 0, 0]) };
+      const flatDir = pts.slice(1, -1).map(() => [1, 0, 0]);
+      return { y, half, base: heelDepth, depth: heelDepth, n, pts, p3: pts.map(to3), din: flatDir, dout: flatDir };
     }
-    const { pts, p3, dirs } = sampled(half, depth, n, half, head ? (p) => { p.z -= head.bump((g.nutY - y) / head.run, Math.abs(p.x) / half); } : null, to3);
-    return { y, half, base: depth, depth: depth + (head ? head.bump((g.nutY - y) / head.run, 0) : 0), n, pts, p3, dirs };
+    const sv = y - g.nutY, tg = head && head.tongue && sv > head.tongue.from ? head.tongue : null;
+    const shift = tg ? (p) => { p.z = -tg.depthAt(p.x, sv, -p.z, depth, half); } : head ? (p) => { p.z -= head.bump(-sv / head.run, Math.abs(p.x) / half); } : null;
+    const { pts, p3, din, dout } = sampled(half, depth, n, half, shift, to3, null, tg ? tg.flatAt(sv) : null);
+    return { y, half, base: depth, depth: tg ? tg.depthAt(0, sv, depth, depth, half) : depth + (head ? head.bump(-sv / head.run, 0) : 0), n, pts, p3, din, dout };
   };
-  // stations: closer together through the blend, where the shape changes fastest
   // Stations: one every STRIP where the shape is changing (the volute, the turn into the headstock, the
   // blend into the heel), and every 10 mm along the plain shaft, with one at each of the 1st and 12th
   // frets where its taper changes.
   const ys = [], blendTop = shaftEnd + blend;
   let from = g.nutY;
   if (head) {
-    from = g.nutY - Math.max(head.run, head.behind);
+    from = g.nutY - Math.max(head.tongue ? -head.tongue.from : head.run, head.behind);
     const k = Math.round((g.nutY - from) / STRIP);
     for (let i = 0; i < k; i++) ys.push(g.nutY - ((g.nutY - from) * i) / k);
   }

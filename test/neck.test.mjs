@@ -147,7 +147,8 @@ test('headstock CAD solid: sound, and the same volume as its cross-sections give
   const off = defaultDesign(); off.neck.head.on = false;
   const bare = derive(off, { tol: 0.005 }).neck.volume;
   const cases = [['starting headstock', {}], ['peaked volute', { voluteStyle: 'peak' }], ['17 degrees', { angle: 17 }], ['10 degrees, thinner', { angle: 10, thickness: 13 }], ['no volute', { voluteHeight: 0 }], ['big peaked volute', { voluteHeight: 8, voluteLength: 60, voluteAhead: 45, voluteStyle: 'peak' }],
-    ['25 degrees, short transition', { angle: 25, transition: 20 }], ['long transition, thick', { transition: 80, thickness: 19 }],
+    ['25 degrees, short transition', { angle: 25, transition: 20 }], ['long transition, thick', { transition: 80, thickness: 19 }], ['a transition that ends exactly on an outline point', { transition: 38 }],
+    ['round tongue', { voluteStyle: 'tongue', voluteHeight: 2, voluteLength: 28 }], ['pointed tongue, narrow cove', { voluteStyle: 'tongue', tongueTip: 'point', voluteHeight: 3, voluteLength: 35, tongueCove: 4 }], ['level tongue, wide cove', { voluteStyle: 'tongue', voluteHeight: 0, voluteLength: 20, tongueCove: 14 }],
     ['lopsided outline', (d) => { const ns = d.neck.head.outline.nodes; ns[2] = { ...ns[2], x: -55, y: 120 }; ns[4] = { ...ns[4], x: 15, y: 210 }; }]];
   for (const [name, change] of cases) {
     const d = defaultDesign();
@@ -162,11 +163,12 @@ test('headstock CAD solid: sound, and the same volume as its cross-sections give
 });
 
 test('the saved neck is the shape the 3D view draws: one surface within 0.4 mm of the cross-sections, a flat headstock back, level tops', () => {
-  for (const [name, change] of [['smooth volute', {}], ['peaked volute', { voluteStyle: 'peak' }], ['25 degrees, short transition', { angle: 25, transition: 20 }]]) {
+  for (const [name, change] of [['smooth volute', {}], ['peaked volute', { voluteStyle: 'peak' }], ['25 degrees, short transition', { angle: 25, transition: 20 }], ['tongue', { voluteStyle: 'tongue', voluteHeight: 2, voluteLength: 28 }]]) {
     const d = defaultDesign(); d.neck.head = { ...d.neck.head, ...change };
     const g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head, r = buildNeckSolid(rc, oc, n, { expectVolume: n.volume });
     const { vertices: V } = r.shape.mesh({ tolerance: 0.05, angularTolerance: 0.3 });
-    const fine = []; for (let v = 0; v <= h.reach + 1e-9; v += 0.5) fine.push(h.at(v).p3);
+    // (a tongue's edge moves sideways quickly as it spreads, so it is compared against sections five times closer together)
+    const gap = h.tongue ? 0.1 : 0.5, fine = []; for (let v = 0; v <= h.reach + 1e-9; v += gap) fine.push(h.at(v).p3);
     let worst = 0, count = 0, flat = 0, flats = 0, high = -1e9, proud = -1e9, nutWide = 0;
     for (let i = 0; i < V.length; i += 3) {
       const p = [V[i], V[i + 1], V[i + 2]], v = (p[1] - g.nutY) * h.cos - (p[2] - n.top) * h.sin, w = -(p[1] - g.nutY) * h.sin - (p[2] - n.top) * h.cos;
@@ -189,4 +191,40 @@ test('the saved neck is the shape the 3D view draws: one surface within 0.4 mm o
     assert.ok(high < 0.05 && proud < 0.05, `${name}: nothing stands more than 0.05 mm above the neck's top (${high.toFixed(4)}) or the headstock's face (${proud.toFixed(4)})`);
     assert.ok(Math.abs(nutWide - d.neck.nutWidth / 2) < 0.05, `${name}: the neck is the nut's width at the nut (half width ${nutWide.toFixed(3)})`);
   }
+});
+
+test('tongue: the headstock\'s flat carried down the neck to a tip, level across, with a crisp edge and a cove into the neck\'s round back', () => {
+  const make = (change) => { const d = defaultDesign(); d.neck.head = { ...d.neck.head, voluteStyle: 'tongue', voluteHeight: 2, voluteLength: 28, ...change }; return derive(d, { tol: 0.005 }); };
+  const g = make({}), n = g.neck, h = n.head, t = h.tongue, nutHalf = defaultDesign().neck.nutWidth / 2;
+  assert.ok(t && t.tip === -28 && t.cove === 8 && !t.pointed, 'tip 28 mm behind the nut, the starting cove, a round tip');
+  // its outline: nothing before the tip, four fifths of the nut's width at the nut, the headstock's full width soon after
+  assert.ok(t.halfOf(-28, 1) === 0 && t.halfOf(-40, 1) === 0 && Math.abs(t.halfOf(0, 1) - 0.8 * nutHalf) < 1e-9 && Math.abs(t.halfOf(0, -1) - 0.8 * nutHalf) < 1e-9);
+  for (let s = -27; s <= 0; s += 1) assert.ok(t.halfOf(s, 1) > t.halfOf(s - 1, 1), 'it widens steadily from the tip to the nut');
+  assert.ok(Math.abs(t.spread - 12) < 1e-9 && t.halfOf(12, 1) > h.widths(12).r && t.halfOf(12, -1) > h.widths(12).l, 'past the nut it covers the headstock\'s full width within one and a half cove widths');
+  assert.ok(t.halfOf(-27, 1) > make({ tongueTip: 'point' }).neck.head.tongue.halfOf(-27, 1) * 1.5, 'a pointed tip is the narrower near its end');
+  // a section through it behind the nut: level from edge to edge, standing 2 mm out from the crown
+  const none = make({ voluteStyle: 'smooth', voluteHeight: 0 }).neck;
+  const sec = n.at(g.nutY - 10), bare = none.at(g.nutY - 10), f = t.halfOf(-10, 1), flat = sec.pts.filter((p) => Math.abs(p.x) <= f + 1e-6 && p.z < -1);
+  assert.ok(Math.abs(sec.depth - bare.depth - 2) < 1e-9, 'it stands out from the crown by the height set');
+  assert.ok(flat.length === 13 && flat.every((p) => Math.abs(p.z + sec.depth) < 1e-9) && Math.abs(Math.max(...flat.map((p) => p.x)) - f) < 1e-6, 'and is level right across, out to its edge');
+  // the edge is a crease: the curve arrives along the flat and leaves straight up the cove's wall
+  const k = sec.pts.findIndex((p) => Math.abs(p.x - f) < 1e-6) - 1, din = sec.din[k], dout = sec.dout[k];
+  assert.ok(Math.abs(din[0] - 1) < 1e-6 && Math.abs(dout[2]) > 0.9 && Math.abs(dout[0]) < 0.45, `a crisp edge (leaving direction ${dout.map((c) => c.toFixed(2))})`);
+  // the cove: at one cove width outside the edge the surface is the neck's own round back again, and arrives there level
+  const roundAt = (x) => -bare.depth * Math.sqrt(Math.max(0, 1 - (x / bare.half) ** 2)); // the starting neck's back is a half ellipse
+  const room = t.coveAt(-10, 1, sec.half);
+  assert.ok(room < 8 && room > 3 && Math.abs(room - (sec.half - f - 0.5)) < 1e-9 && t.coveAt(-27.9, 1, sec.half) === 8, 'the cove narrows where the tongue\'s edge nears the edge of the neck, so it runs out before that edge');
+  const outer = sec.pts.filter((p) => p.x > f + room + 0.01 && p.z < -0.2);
+  assert.ok(outer.length > 0 && outer.every((p) => Math.abs(p.z - roundAt(p.x)) < 0.02), 'beyond the cove it is the neck\'s round back');
+  const inCove = sec.pts.filter((p) => p.x > f + 0.3 && p.x < f + room - 0.3);
+  assert.ok(inCove.length > 3 && inCove.every((p) => p.z > -sec.depth && p.z < roundAt(p.x) + 1e-6), 'inside the cove it lies between the two');
+  // before the tip the neck is untouched; past the end of the transition the headstock is its plain flat
+  assert.ok(Math.abs(n.at(g.nutY - 28 - 8 - 2).depth - none.at(g.nutY - 38).depth) < 1e-9);
+  const end = h.sections[h.sections.length - 1];
+  assert.ok(end.base === h.thick && Math.abs(end.depth - h.thick) < 1e-9 && Math.abs(t.proud(h.reach)) < 1e-12 && t.proud(-5) === 2);
+  // with the height at 0 the tongue is level with the crown
+  const level = make({ voluteHeight: 0 }).neck;
+  assert.ok(Math.abs(level.at(g.nutY - 10).depth - bare.depth) < 1e-9 && level.head.tongue);
+  // an older file's volute settings still open as they were
+  assert.equal(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: defaultDesign().outline, neck: { scale: 647.7, head: { on: true, angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteStyle: 'peak', transition: 45 } } }).neck.head.tongueCove, 8);
 });

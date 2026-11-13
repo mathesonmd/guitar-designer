@@ -673,7 +673,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const b2 = (await state()).neck.back;
   assert(Math.abs(b2.t1 - 20.32) < 1e-6 && Math.abs(b2.fullness - 2.4) < 1e-6, 'profile restored, fullness stored');
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: a flat \(unangled\) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: drawing the side view of the back and the tongue’s outline, a flat \(unangled\) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
   // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
   const h0 = (await state()).neck.head;
   assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
@@ -686,13 +686,25 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   await dragWorld({ x: before[4].x, y: before[4].y + nut }, { x: before[4].x + 12, y: before[4].y + nut + 25 });
   const after = (await state()).neck.head.outline.nodes;
   near(after[4].x, before[4].x + 12, 0.8, 'tip moved across'); near(after[4].y, before[4].y + 25, 0.8, 'tip moved along');
+  // the Smooth / Corner / Delete bar must not sit on the point being adjusted
+  const bar = await page.locator('.stage [data-k="pointbar"]').boundingBox(), dot = await page.locator('.stage [data-k="node"]').nth(4).boundingBox();
+  assert(bar && dot, 'the point bar is shown for the selected point');
+  const cx = dot.x + dot.width / 2, cy = dot.y + dot.height / 2, gapX = Math.max(bar.x - cx, cx - (bar.x + bar.width), 0), gapY = Math.max(bar.y - cy, cy - (bar.y + bar.height), 0);
+  assert(Math.hypot(gapX, gapY) > 60, `the point bar stays clear of the point (${Math.hypot(gapX, gapY).toFixed(0)} px away)`);
   await dragWorld({ x: before[0].x, y: nut }, { x: before[0].x - 20, y: nut + 15 });
   const pinned = (await state()).neck.head.outline.nodes;
   assert(pinned[0].x === before[0].x && pinned[0].y === before[0].y, 'the end at the corner of the nut does not move');
   assert((await state()).outline.nodes.length === n0len, 'the body outline was not touched');
   await page.keyboard.press('Escape');
-  await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm'); await setField('#hs-va', '30 mm');
+  // a tongue: the flat of the headstock's back carried down the neck
+  await page.locator('section[data-sec="neck"] button:has-text("Tongue")').click();
+  await setField('#hs-cv', '10 mm'); await setField('#hs-vl', '30 mm');
+  await page.locator('section[data-sec="neck"] button:has-text("Pointed")').click();
+  const ht = (await state()).neck.head;
+  assert(ht.voluteStyle === 'tongue' && ht.tongueTip === 'point' && Math.abs(ht.tongueCove - 10) < 1e-6 && Math.abs(ht.voluteLength - 30) < 1e-6, 'tongue, its tip and its cove stored');
+  assert(/The tongue is the flat back of the headstock carried down the back of the neck/.test(await page.locator('section[data-sec="neck"]').innerText()) && await page.locator('#hs-va').count() === 0, 'the panel describes the tongue and hides the volute-only setting');
   await page.locator('section[data-sec="neck"] button:has-text("Peaked")').click();
+  await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm'); await setField('#hs-va', '30 mm'); await setField('#hs-vl', '40 mm');
   const h1 = (await state()).neck.head;
   assert(h1.angle === 12 && Math.abs(h1.voluteHeight - 5) < 1e-6 && Math.abs(h1.transition - 50) < 1e-6 && Math.abs(h1.voluteAhead - 30) < 1e-6 && h1.voluteStyle === 'peak', 'angle, transition length, volute height, its length toward the headstock and its shape stored');
   assert(/are one continuous surface/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says how the neck meets the headstock');

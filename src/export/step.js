@@ -365,10 +365,10 @@ export function buildNeckSolid(rc, oc, neck, { expectVolume } = {}) {
     return out;
   };
   const wireOf = (sec) => {
-    // p3 is: top corner, the back's 49 points, the other top corner. dirs gives the back's direction at each of the 49.
+    // p3 is: top corner, the back's 49 points, the other top corner. din and dout give the back's direction arriving at and leaving each of the 49.
     const P = sec.p3, B = P.slice(1, -1), last = B.length - 1, edges = [rc.makeLine(P[0], B[0])];
     for (let i = 0; i < last; i += STEP) {
-      const j = Math.min(last, i + STEP), a = B[i], b = B[j], ta = sec.dirs[i], tb = sec.dirs[j], h = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 3;
+      const j = Math.min(last, i + STEP), a = B[i], b = B[j], ta = sec.dout[i], tb = sec.din[j], h = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 3;
       edges.push(rc.makeBezierCurve([a, a.map((c, k) => c + ta[k] * h), b.map((c, k) => c - tb[k] * h), b]));
     }
     edges.push(rc.makeLine(B[last], P[P.length - 1]));

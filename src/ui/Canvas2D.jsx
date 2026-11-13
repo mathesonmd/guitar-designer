@@ -420,7 +420,8 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       </svg>
 
       {selNode && selNodeScreen && !drag.current && (
-        <div className="float" style={{ left: Math.max(8, Math.min(size.w - 250, selNodeScreen.x + 16)), top: Math.max(8, Math.min(size.h - 50, selNodeScreen.y - 46)) }}>
+        /* kept well clear of the point and its handles: below a point in the upper half of the drawing, above one in the lower half */
+        <div className="float" data-k="pointbar" style={{ left: Math.max(8, Math.min(size.w - 250, selNodeScreen.x - 120)), top: selNodeScreen.y < size.h / 2 ? Math.min(size.h - 50, selNodeScreen.y + 96) : Math.max(8, selNodeScreen.y - 136) }}>
           <div className="seg" role="group" aria-label="Point type">
             <button type="button" className={selNode.k === 's' ? 'on' : ''} onClick={() => { begin(); edit((ds) => store(ds, stored(ds).map((n, i) => (i === nodeSel ? setKind(n, 's') : n)))); commit(); }}>Smooth</button>
             <button type="button" className={selNode.k === 'c' ? 'on' : ''} onClick={() => { begin(); edit((ds) => store(ds, stored(ds).map((n, i) => (i === nodeSel ? setKind(n, 'c') : n)))); commit(); }}>Corner</button>

@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 77 geometry and export tests (Node, no browser)
+    npm test               # 78 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -172,6 +172,17 @@ CAD solid; the 3D view draws the same cross-sections.
   to nothing, and level, at the neck's edges and along a rounded line toward the heel and toward the
   headstock; each of those sides has its own length, so the two slopes can differ. Smooth is rounded over
   the top; peaked comes to a point. It cannot reach past the end of the transition.
+- A tongue (the third volute shape) is the flat of the headstock's back carried down the back of the
+  neck to a round or pointed tip, with a crisp edge, as on a dart or a tongue volute. Behind the nut it
+  stands a set height out from the crown; at the nut it is four fifths of the nut's width; past the nut
+  it spreads to the headstock's full width within one and a half cove widths. Outside its edge the surface
+  returns to the neck's round back through a cove (a quarter circle in section, upright at the tongue's
+  edge), which narrows where the tongue's edge is near the neck's edge so it never leaves a step there.
+  Every section carries the tongue's edge at the same point of its outline, which is what keeps that edge
+  a crisp line. Its outline comes from numbers; it cannot be drawn yet.
+- Past the nut the sections lean back smoothly, from upright at the nut to square with the headstock's
+  face, over a length long enough that no two cross within 30 mm of the face. (A lean that started or
+  stopped abruptly left a faint line across the flat of a tongue.)
 - The CAD solid is built with no cutting or joining operations. The skin joins each cross-section to the
   next with straight lines; sections are 1 mm apart wherever the shape is changing (within about 0.01 mm
   of the true curve) and 10 mm apart on the plain shaft. The heel block and the flat of the headstock are
@@ -184,7 +195,8 @@ CAD solid; the 3D view draws the same cross-sections.
 - The neck's volume is the shaft by its cross-sections, the transition as the closed shape its sections
   make when joined by straight lines, and the flat part's area times its thickness. The CAD solid must
   match it within 1.5% or it is not saved; in a sweep of 48 randomized headstocks all were within 0.2%.
-- Not built: a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
+- Not built: drawing the side view of the back and the tongue's outline as guide lines (the owner's
+  suggestion), a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
 
 ## Not built yet
 
