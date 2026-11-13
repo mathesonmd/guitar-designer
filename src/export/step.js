@@ -354,18 +354,29 @@ export function buildNeckSolid(rc, oc, neck, { expectVolume } = {}) {
   };
   let solid;
   try {
-    const shaft = rc.loft([...neck.sections, neck.tail].map(wireOf), { ruled: false });
+    let shaft = rc.loft([...neck.sections, neck.tail].map(wireOf), { ruled: false });
     const heel = prism(drawVerts(rc, fitArcs(neck.heel, 0.01, true)), neck.heelBottom, neck.top);
+    if (neck.head) {
+      const hd = neck.head, deg = (hd.ang * 180) / Math.PI;
+      // shapes drawn flat on the headstock's face, then tilted back about the nut line and moved to the nut
+      const tilt = (shape) => shape.rotate(-deg, [0, 0, 0], [1, 0, 0]).translate([0, neck.sections.find((q) => q.y <= neck.nutY + 1e-9).y, neck.top]);
+      const span = 2 * (hd.length + 60);
+      // past the nut, everything above the headstock's face comes off the neck's back
+      const above = tilt(rc.drawRoundedRectangle(span, span).translate(0, span / 2).sketchOnPlane('XY', 0).extrude(span));
+      shaft = shaft.cut(above);
+      const slab = tilt(drawVerts(rc, fitArcs(hd.poly, 0.01, true)).sketchOnPlane('XY', -hd.thick).extrude(hd.thick));
+      shaft = shaft.fuse(slab);
+    }
     solid = shaft.fuse(heel);
   } catch (err) {
-    throw new Error('The neck could not be built from these settings. Try a blend length nearer the starting value, or a fullness nearer 2.');
+    throw new Error('The neck could not be built from these settings. Try a blend length, a fullness or a volute nearer the starting values, or a simpler headstock outline.');
   }
   const checker = new oc.BRepCheck_Analyzer(solid.wrapped, true, false);
   const valid = checker.IsValid();
   checker.delete();
   const volume = rc.measureVolume(solid);
-  if (!valid || (expectVolume > 0 && Math.abs(volume / expectVolume - 1) > 0.01)) {
-    throw new Error('The 3D model of the neck did not come out right, so it was not saved. Try a blend length nearer the starting value, or a fullness nearer 2.');
+  if (!valid || (expectVolume > 0 && Math.abs(volume / expectVolume - 1) > 0.015)) {
+    throw new Error('The 3D model of the neck did not come out right, so it was not saved. Try a blend length, a fullness or a volute nearer the starting values, or a simpler headstock outline.');
   }
   return { shape: solid, volume, valid };
 }

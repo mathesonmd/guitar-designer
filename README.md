@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 72 geometry and export tests (Node, no browser)
+    npm test               # 75 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -157,7 +157,14 @@ CAD solid; the 3D view draws the same cross-sections.
   curve, so fullness, fretboard thickness and the blend length are starting values tagged "assumed".
 - The round back blends into a square heel as deep as the pocket plus what stands above the body, with
   the pocket's own outline. The model sits in the pocket, in the body's own coordinates.
-- Not built: headstock, volute, truss rod channel, heel screw holes.
+- The headstock is a flat slab tilted back from the nut, to an outline drawn in the app. The outline is
+  drawn flat, at its true shape, above the nut on the drawing, and edits like the body outline; its two
+  ends are pinned to the corners of the nut (`outline.open`).
+- The volute: behind the nut the back deepens by the volute's height over its length, carries on past
+  the nut at that depth until it is inside the headstock, and is cut off level with the headstock's face.
+- The neck's volume is worked out slice by slice across the neck, with the headstock's slice merged into
+  the back's wherever they overlap. The CAD solid must match it within 1.5% or it is not saved.
+- Not built: a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
 
 ## Not built yet
 

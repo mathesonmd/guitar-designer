@@ -17,3 +17,26 @@ export const NECK_PROFILE_BASIS = ['published', 'warmothNeckProfiles'];
 //   fullness how full the shoulders are: 2 is a half ellipse; higher is fuller, lower is slimmer
 //   blend    length over which the round back turns into the square heel
 export const NECK_SHAPE_START = { board: 0.25 * IN, fullness: 2, blend: 30 };
+
+// An angled headstock: starting values with no published source (basis: assumed).
+//   angle         how far the headstock tilts back from the line of the neck, in degrees
+//   thickness     how thick the headstock is
+//   voluteHeight  how far the volute (the swell on the back, under the nut) stands out from the neck's back
+//   voluteLength  the length behind the nut over which the back swells out to the volute
+export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40 };
+
+// A starting outline for the headstock: an original shape to redraw. It is drawn flat, at its true shape,
+// x across and y along the headstock's face from the nut. Its two ends are pinned to the corners of the
+// nut, so only the points between them are stored as drawn.
+const N = (a) => a.map(([x, y, ix, iy, ox, oy, k]) => ({ x, y, ix, iy, ox, oy, k }));
+export const HEADSTOCK_OUTLINE_START = N([
+  [-20.95, 0, 0, 0, 0, 8, 'c'],
+  [-36, 38, 4, -14, -3, 14, 's'],
+  [-40, 110, 0, -25, 0, 22, 's'],
+  [-24, 168, -12, -10, 10, 8, 's'],
+  [0, 180, -10, 0, 10, 0, 's'],
+  [24, 168, -10, 8, 12, -10, 's'],
+  [40, 110, 0, 22, 0, -25, 's'],
+  [36, 38, 3, 14, -4, -14, 's'],
+  [20.95, 0, 0, 8, 0, 0, 'c'],
+]);

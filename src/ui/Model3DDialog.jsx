@@ -182,13 +182,17 @@ export default function Model3DDialog({ design, onClose, toast }) {
       {g.neck && (
         <>
           <h4>3D model of the neck</h4>
-          <p>The neck’s shaft and heel, as a {kind === 'stl' ? 'mesh (STL)' : 'solid (STEP)'} in the file type chosen above. It sits where it belongs in the pocket, in the same position as the body model, so the two fit together when both are opened.</p>
+          <p>The neck{g.neck.head ? ', with its headstock and volute' : '’s shaft and heel'}, as a {kind === 'stl' ? 'mesh (STL)' : 'solid (STEP)'} in the file type chosen above. It sits where it belongs in the pocket, in the same position as the body model, so the two fit together when both are opened.</p>
           <ul className="plain">
             <li>A flat top, where the fretboard is glued. The fretboard and frets are not part of it.</li>
             <li>The back: {both(g.neck.d1)} of wood at the 1st fret and {both(g.neck.d12)} at the 12th, blending over {both(g.neck.blend)} into the heel.</li>
             <li>The heel: a block {both(g.neck.heelDepth)} deep with the pocket’s own outline. It is {both(g.neck.length)} from the nut to the end of the heel.</li>
+            {g.neck.head && <li>The headstock: {both(g.neck.head.thick)} thick, tilted back {+((g.neck.head.ang * 180) / Math.PI).toFixed(1)}° from the nut, {both(g.neck.head.length)} long, to the outline you drew.</li>}
+            {g.neck.head && (g.neck.head.rise > 0
+              ? <li>The volute: the back swells out {both(g.neck.head.rise)} over the {both(g.neck.head.run)} behind the nut.</li>
+              : <li>No volute.</li>)}
           </ul>
-          <p className="note"><b>Not in the file:</b> the headstock and volute, the truss rod channel, and the heel’s screw holes. The neck ends square at the nut.</p>
+          <p className="note"><b>Not in the file:</b> tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes.{g.neck.head ? '' : ' The headstock is switched off, so the neck ends square at the nut.'}</p>
           <p className="note" style={{ color: 'var(--brass)' }}>Not yet checked in the real world: a neck file from here has not been opened in any program, and nothing has been cut from it. The shape of the back is a starting curve with no published source: compare it with a neck you like before cutting.</p>
           {inViewer() ? null : (
             <div style={{ display: 'flex', gap: 12, alignItems: 'center', flexWrap: 'wrap', marginTop: 10 }}>

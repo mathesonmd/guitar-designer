@@ -24,7 +24,8 @@ test('neck thickness profiles carry Warmoth\'s published figures', () => {
 });
 
 test('neck shape: thickness less the fretboard at the 1st and 12th frets, a half ellipse across, and a heel that fills the pocket', () => {
-  const d = defaultDesign(), g = derive(d, { tol: 0.005 }), n = g.neck, nk = d.neck, T = d.body.thickness;
+  const d = defaultDesign(); d.neck.head.on = false; // the shaft and heel on their own
+  const g = derive(d, { tol: 0.005 }), n = g.neck, nk = d.neck, T = d.body.thickness;
   assert.ok(Math.abs(n.d1 - (0.8 * 25.4 - 6.35)) < 1e-9 && Math.abs(n.d12 - (0.85 * 25.4 - 6.35)) < 1e-9, 'wood under the fretboard = thickness - fretboard');
   const y1 = g.nutY - fretDistance(nk.scale, 1), y12 = g.nutY - fretDistance(nk.scale, 12);
   assert.ok(Math.abs(n.at(g.nutY).depth - n.d1) < 1e-9 && Math.abs(n.at(y1).depth - n.d1) < 1e-9, 'held from the nut to the 1st fret');
@@ -43,20 +44,71 @@ test('neck shape: thickness less the fretboard at the 1st and 12th frets, a half
   assert.ok(Math.abs(hb.x1 - hb.x0 - nk.heelWidth) < 1e-6 && Math.abs(hb.y0 - g.heelY) < 1e-6 && Math.abs(hb.y1 - (g.heelY + nk.pocketLength)) < 1e-6);
   assert.ok(Math.abs(n.length - nk.nutToHeel) < 1e-9);
   // an older file, saved before the neck had a shape, opens with the starting shape
-  assert.deepEqual(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, neck: { scale: 647.7 } }).neck.back, d.neck.back);
+  const old = normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, neck: { scale: 647.7 } }).neck;
+  assert.deepEqual(old.back, d.neck.back);
+  assert.deepEqual(old.head, defaultDesign().neck.head, 'and with the starting headstock');
 });
 
 test('neck CAD solid: sound, and the same volume as its cross-sections give, for every profile and a range of shapes', () => {
   const cases = Object.keys(NECK_PROFILES).map((k) => [k, { t1: NECK_PROFILES[k].t1, t12: NECK_PROFILES[k].t12 }]).concat([['fuller shoulders', { fullness: 3 }], ['slimmer shoulders', { fullness: 1.6 }], ['short blend', { blend: 12 }], ['long blend', { blend: 80 }], ['thick fretboard', { board: 8 }]]);
   let last = 0;
   for (const [name, back] of cases) {
-    const d = defaultDesign(); d.neck.back = { ...d.neck.back, ...back };
+    const d = defaultDesign(); d.neck.head.on = false; d.neck.back = { ...d.neck.back, ...back };
     const n = derive(d, { tol: 0.005 }).neck, r = buildNeckSolid(rc, oc, n, { expectVolume: n.volume });
     assert.equal(r.valid, true, name);
     assert.ok(pct(r.volume, n.volume) < 0.3, `${name}: volume differs by ${pct(r.volume, n.volume).toFixed(3)}%`);
     last = n.volume;
   }
-  const n = derive(defaultDesign(), { tol: 0.005 }).neck;
+  const plain = defaultDesign(); plain.neck.head.on = false;
+  const n = derive(plain, { tol: 0.005 }).neck;
   assert.throws(() => buildNeckSolid(rc, oc, n, { expectVolume: n.volume * 1.05 }), /did not come out right, so it was not saved/);
   assert.ok(last > 250000 && last < 450000, 'a believable amount of wood');
+});
+
+// ---- the angled headstock and the volute ----
+test('headstock: a slab tilted back from the nut, its outline at true shape with both ends on the corners of the nut', () => {
+  const d = defaultDesign(), nk = d.neck;
+  nk.head.outline.nodes[0].x = -99; nk.head.outline.nodes[0].y = 7; // wherever the ends are stored, they are drawn on the nut's corners
+  const g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head;
+  assert.ok(Math.abs(h.nodes[0].x + nk.nutWidth / 2) < 1e-9 && h.nodes[0].y === 0 && Math.abs(h.nodes[h.nodes.length - 1].x - nk.nutWidth / 2) < 1e-9);
+  assert.ok(Math.abs(h.ang - (14 * Math.PI) / 180) < 1e-12 && h.thick === 15 && Math.abs(h.length - 180) < 0.01);
+  // its face meets the neck's top along the nut line and drops as it runs out
+  const a = h.place(0, 0, 0), b = h.place(0, 100, 0), under = h.place(0, 100, h.thick);
+  assert.ok(Math.abs(a.y - g.nutY) < 1e-9 && Math.abs(a.z - n.top) < 1e-9);
+  assert.ok(Math.abs(b.y - (g.nutY + 100 * Math.cos(h.ang))) < 1e-9 && Math.abs(b.z - (n.top - 100 * Math.sin(h.ang))) < 1e-9);
+  assert.ok(Math.abs(Math.hypot(under.y - b.y, under.z - b.z) - 15) < 1e-9 && under.z < b.z, 'its back is one thickness below its face, square to it');
+});
+
+test('volute: the back swells out behind the nut, carries on past it, and is cut off level with the headstock\'s face', () => {
+  const d = defaultDesign(), g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head;
+  const off = defaultDesign(); off.neck.head.on = false;
+  const bare = derive(off, { tol: 0.005 }).neck;
+  assert.ok(Math.abs(n.at(g.nutY).depth - (bare.at(g.nutY).depth + 4)) < 1e-9, 'deeper by the volute\'s height at the nut');
+  assert.ok(Math.abs(n.at(g.nutY - 40).depth - bare.at(g.nutY - 40).depth) < 1e-9, 'and not at all one volute length behind it');
+  const mid = n.at(g.nutY - 20).depth - bare.at(g.nutY - 20).depth;
+  assert.ok(Math.abs(mid - 2) < 1e-9, 'half way there, half the height');
+  const past = n.at(g.nutY + 10);
+  assert.ok(Math.abs(past.depth - (n.d1 + 4)) < 1e-9 && Math.abs(past.half * 2 - d.neck.nutWidth) < 1e-9);
+  const lid = -10 * Math.tan(h.ang);
+  assert.ok(past.cut.every((p) => p.z <= lid + 1e-9) && past.cut.some((p) => Math.abs(p.z - lid) < 1e-9), 'nothing stands above the headstock\'s face');
+  assert.ok(h.past > (n.d1 + 4 - h.thick / h.cos) / h.tan, 'it runs on until it is inside the headstock');
+  const flat = defaultDesign(); flat.neck.head.voluteHeight = 0;
+  assert.ok(Math.abs(derive(flat, { tol: 0.005 }).neck.at(g.nutY).depth - bare.at(g.nutY).depth) < 1e-9, 'a height of 0 leaves the volute off');
+});
+
+test('headstock CAD solid: sound, and the same volume as slices across it give, for a range of angles, volutes and outlines', () => {
+  const off = defaultDesign(); off.neck.head.on = false;
+  const bare = derive(off, { tol: 0.005 }).neck.volume;
+  const cases = [['starting headstock', {}], ['17 degrees', { angle: 17 }], ['10 degrees, thinner', { angle: 10, thickness: 13 }], ['no volute', { voluteHeight: 0 }], ['big volute', { voluteHeight: 8, voluteLength: 60 }],
+    ['lopsided outline', (d) => { const ns = d.neck.head.outline.nodes; ns[2] = { ...ns[2], x: -55, y: 120 }; ns[4] = { ...ns[4], x: 15, y: 210 }; }]];
+  for (const [name, change] of cases) {
+    const d = defaultDesign();
+    if (typeof change === 'function') change(d); else d.neck.head = { ...d.neck.head, ...change };
+    const n = derive(d, { tol: 0.005 }).neck, r = buildNeckSolid(rc, oc, n, { expectVolume: n.volume });
+    assert.equal(r.valid, true, name);
+    assert.ok(pct(r.volume, n.volume) < 0.5, `${name}: volume differs by ${pct(r.volume, n.volume).toFixed(3)}%`);
+    // the headstock adds about its outline's area times its thickness
+    const area = Math.abs(n.head.poly.reduce((a, p, i) => { const q = n.head.poly[(i + 1) % n.head.poly.length]; return a + p.x * q.y - q.x * p.y; }, 0)) / 2;
+    assert.ok(Math.abs((n.volume - bare) / (area * n.head.thick) - 1) < 0.08, `${name}: the headstock adds ${((n.volume - bare) / 1000).toFixed(1)} cm3 against ${((area * n.head.thick) / 1000).toFixed(1)} for its slab alone`);
+  }
 });

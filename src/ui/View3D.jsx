@@ -108,8 +108,8 @@ export default function View3D({ design, g, solid, onSaveModel }) {
       mesh.position.z = z0;
       st.extras.add(mesh);
     };
-    // the neck's own shape (model/neck.js): the heel block in the pocket and the shaft through its
-    // cross-sections; then a plain paddle headstock, which is only a stand-in
+    // the neck's own shape (model/neck.js): the heel block in the pocket, the shaft through its
+    // cross-sections, and the headstock
     const h = g.neckHalf;
     const neck = g.neck, zTop = neck ? neck.top : zHeelTop;
     if (neck) {
@@ -117,18 +117,26 @@ export default function View3D({ design, g, solid, onSaveModel }) {
       const secs = neck.sections, pos = [], P = (s, p) => [p.x, s.y, neck.top + p.z];
       for (let i = 0; i < secs.length - 1; i++) {
         const a = secs[i], b = secs[i + 1], m = a.pts.length;
-        for (let j = 0; j < m - 1; j++) pos.push(...P(a, a.pts[j]), ...P(b, b.pts[j]), ...P(b, b.pts[j + 1]), ...P(a, a.pts[j]), ...P(b, b.pts[j + 1]), ...P(a, a.pts[j + 1]));
+        for (let j = 0; j < m - 1; j++) pos.push(...P(a, a.cut[j]), ...P(b, b.cut[j]), ...P(b, b.cut[j + 1]), ...P(a, a.cut[j]), ...P(b, b.cut[j + 1]), ...P(a, a.cut[j + 1]));
         // the flat top between the two sections
-        pos.push(...P(a, a.pts[0]), ...P(a, a.pts[m - 1]), ...P(b, b.pts[m - 1]), ...P(a, a.pts[0]), ...P(b, b.pts[m - 1]), ...P(b, b.pts[0]));
+        pos.push(...P(a, a.cut[0]), ...P(a, a.cut[m - 1]), ...P(b, b.cut[m - 1]), ...P(a, a.cut[0]), ...P(b, b.cut[m - 1]), ...P(b, b.cut[0]));
       }
       const first = secs[0]; // the end at the nut
-      for (let j = 1; j < first.pts.length - 1; j++) pos.push(...P(first, first.pts[0]), ...P(first, first.pts[j + 1]), ...P(first, first.pts[j]));
+      for (let j = 1; j < first.cut.length - 1; j++) pos.push(...P(first, first.cut[0]), ...P(first, first.cut[j + 1]), ...P(first, first.cut[j]));
       const shaft = new THREE.BufferGeometry(); shaft.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); shaft.computeVertexNormals();
       const shaftMat = maple.clone(); shaftMat.side = THREE.DoubleSide;
       st.extras.add(new THREE.Mesh(shaft, shaftMat));
     }
     const hw = h(g.nutY);
-    ex([{ x: -hw, y: g.nutY }, { x: hw, y: g.nutY }, { x: hw + 16, y: g.nutY + 40 }, { x: hw + 14, y: g.nutY + 165 }, { x: -hw + 4, y: g.nutY + 178 }, { x: -hw - 6, y: g.nutY + 40 }], zHeelTop - 13, zHeelTop, maple);
+    if (neck && neck.head) {
+      // the headstock at its true shape, tilted back about the nut line
+      const hd = neck.head, shape = new THREE.Shape(hd.poly.map((p) => new THREE.Vector2(p.x, p.y)));
+      const geo = new THREE.ExtrudeGeometry(shape, { depth: hd.thick, bevelEnabled: false, curveSegments: 1 });
+      geo.translate(0, 0, -hd.thick);
+      const mesh = new THREE.Mesh(geo, maple);
+      mesh.rotation.x = -hd.ang; mesh.position.set(0, g.nutY, neck.top);
+      st.extras.add(mesh);
+    }
     ex(g.fretboard, zHeelTop, zBoardTop, board);
     for (const f of g.frets) { const m = new THREE.Mesh(new THREE.BoxGeometry(f.half * 2, 2.2, 1.1), metal); m.position.set(0, f.y, zBoardTop + 0.5); st.extras.add(m); }
     const nut = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 3.2, 3), bone); nut.position.set(0, g.nutY + 1.6, zBoardTop + 1.2); st.extras.add(nut);
@@ -160,7 +168,7 @@ export default function View3D({ design, g, solid, onSaveModel }) {
         <div className="float" style={{ position: 'static' }}><Check checked={parts} onChange={setParts}>Neck and hardware</Check></div>
         {onSaveModel && <button className="btn" onClick={onSaveModel}>Save files for CNC…</button>}
       </div>
-      <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>The headstock, fretboard and hardware are shown for looks</span></div>
+      <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>The fretboard and hardware are shown for looks</span></div>
     </div>
   );
 }

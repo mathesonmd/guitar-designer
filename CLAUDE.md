@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 72 geometry and export tests (29 of them build the CAD solid)
+    npm test                  # 75 geometry and export tests (30 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 34 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -96,8 +96,10 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   way of cutting pockets once gave a body 7% too heavy with no error at all.
 - No depth without a source applies here too: a hole with no recorded depth is left out of the STEP file
   and named in the save dialog, never drilled to a guess.
-- The neck's headstock (owner's decision, 13 November 2026): angled with a volute first, its outline
-  drawn in the app the way the body outline is; a flat (Fender-style) headstock is needed as well, after.
+- The neck's headstock (owner's decision, 13 November 2026): angled with a volute first (built), its
+  outline drawn in the app the way the body outline is; a flat (Fender-style) headstock is needed as well.
+  The drawing edits whichever outline the selection names (`sel.of === 'head'`); the headstock's points
+  are stored from the nut line and shown `g.nutY` higher.
   He said the first neck models "look really good for a first try".
 - Electric Herald is a collection of other people's drawings, mostly 1:1 PDFs, "left intact with respect
   to original publishers", with accuracy not guaranteed and no license granting reuse. Do not bundle its
@@ -127,11 +129,13 @@ with a purfling channel along its inner line; live build checks; 3D view; templa
 offsets, laser kerf, alignment pins, engraved legend; DXF, SVG, PDF and zip export; 2D CNC vectors for
 pockets and holes, in millimeters or inches; a 3D model of the body as STEP (true solid) or STL (fine
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
-roundover; a binding channel; hole depths entered per hardware; the neck's shaft and heel as a 3D model
-(thickness from Warmoth's published profiles, a flat top for the fretboard, a heel that fills the pocket).
+roundover; a binding channel; hole depths entered per hardware; the neck as a 3D model: shaft and heel
+(thickness from Warmoth's published profiles, a flat top for the fretboard, a heel that fills the pocket)
+and an angled headstock with a volute, its outline drawn in the app.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
-carved tops, the neck's headstock and volute, its truss rod channel and heel screw holes, a sculpted
+carved tops, a flat (unangled) headstock, tuner holes, the nut slot, the neck's truss rod channel and
+heel screw holes, a sculpted
 heel on the body, STEP roundovers larger than the outline's
 tightest outside curve, the purfling channel in the STEP and STL (it is in the 3D picture and the CNC
 vectors only), the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
@@ -153,6 +157,7 @@ touch gestures, Safari and Firefox are untried.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
 - Whether the demo copies of the app work for him (the artifact, and `dist/index.html` opened from disk).
+- The headstock: whether the volute's shape is right, and his numbers for angle, thickness and volute.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.

@@ -15,8 +15,23 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
   const drag = useRef(null);
   const pointers = useRef(new Map());
   const units = design.units;
-  const sym = design.outline.symmetric;
-  const nodes = design.outline.nodes;
+  // Which outline is being edited: the body's, or the headstock's. The headstock's is drawn flat, at its
+  // true shape, starting at the nut line, so on the drawing its points sit `lift` above where they are stored.
+  const headOn = !!(design.neck.head && design.neck.head.on);
+  const of = sel && sel.of === 'head' && headOn ? 'head' : 'body';
+  const lift = of === 'head' ? g.nutY : 0;
+  const cur = of === 'head' ? design.neck.head.outline : design.outline;
+  const sym = of === 'body' && cur.symmetric;
+  const open = of === 'head';       // an open outline's two end points are fixed
+  const closed = !sym && !open;
+  const up = (n) => (lift ? { ...n, y: n.y + lift } : n), down = (n) => (lift ? { ...n, y: n.y - lift } : n);
+  const nodes = useMemo(() => cur.nodes.map(up), [cur.nodes, lift]);
+  const stored = (ds) => (of === 'head' ? ds.neck.head.outline.nodes : ds.outline.nodes);
+  const store = (ds, ns) => (of === 'head'
+    ? { ...ds, neck: { ...ds.neck, head: { ...ds.neck.head, outline: { ...ds.neck.head.outline, nodes: ns } } } }
+    : { ...ds, outline: { ...ds.outline, nodes: ns } });
+  const fixed = (i, count) => open && (i === 0 || i === count - 1);
+  const pick = (extra) => (of === 'head' ? { ...extra, of: 'head' } : extra);
 
   const fit = useCallback(() => {
     if (!size.w || !size.h) return;
@@ -25,6 +40,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     const s = Math.min(size.w / (x1 - x0), size.h / (y1 - y0));
     setView({ s, tx: size.w / 2 - ((x0 + x1) / 2) * s, ty: size.h / 2 + ((y0 + y1) / 2) * s });
   }, [size.w, size.h, g.bbox, g.heelY]);
+
+  // When the headstock's outline is picked for reshaping, bring the headstock into view.
+  useEffect(() => {
+    if (of !== 'head' || !size.w || !size.h || !g.neck || !g.neck.head) return;
+    const hw = Math.max(40, ...g.neck.head.poly.map((p) => Math.abs(p.x))) + 30, y0 = g.nutY - 50, y1 = g.nutY + g.neck.head.length + 30;
+    const s = Math.min(size.w / (2 * hw), size.h / (y1 - y0));
+    setView({ s, tx: size.w / 2, ty: size.h / 2 + ((y0 + y1) / 2) * s });
+  }, [of]); // eslint-disable-line
 
   const fitted = useRef(false);
   useEffect(() => { if (!fitted.current && size.w > 0) { fitted.current = true; fit(); } }, [size.w, fit]);
@@ -72,10 +95,10 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     const w = toWorld(e);
     if (!t || e.button === 1) { drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, view, moved: false }; return; }
     const k = t.dataset.k, id = t.dataset.id, i = t.dataset.i !== undefined ? +t.dataset.i : undefined;
-    if (k === 'outline') { setSel({ kind: 'outline' }); drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, view, moved: false, keepSel: true }; return; }
+    if (k === 'outline') { setSel(t.dataset.of === 'head' ? { kind: 'outline', of: 'head' } : { kind: 'outline' }); drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, view, moved: false, keepSel: true }; return; }
     begin();
-    if (k === 'node') { setSel({ kind: 'node', i }); drag.current = { kind: 'node', i, w0: w, n0: { ...nodes[i] } }; }
-    else if (k === 'hin' || k === 'hout') { setSel({ kind: 'node', i }); drag.current = { kind: k, i, n0: { ...nodes[i] } }; }
+    if (k === 'node') { setSel(pick({ kind: 'node', i })); drag.current = { kind: 'node', i, w0: w, n0: { ...nodes[i] } }; }
+    else if (k === 'hin' || k === 'hout') { setSel(pick({ kind: 'node', i })); drag.current = { kind: k, i, n0: { ...nodes[i] } }; }
     else if (k === 'pickup') { const p = design.pickups.find((q) => q.id === id); setSel({ kind: 'pickup', id }); drag.current = { kind: 'pickup', id, w0: w, p0: { ...p } }; }
     else if (k === 'control') { const c = design.controls.find((q) => q.id === id); setSel({ kind: 'control', id }); drag.current = { kind: 'control', id, w0: w, p0: { ...c } }; }
     else if (k === 'cavity') { const c = design.cavities.find((q) => q.id === id); setSel({ kind: 'cavity', id }); drag.current = { kind: 'cavity', id, w0: w, p0: { ...c } }; }
@@ -110,21 +133,23 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       let dx = w.x - d.w0.x, dy = w.y - d.w0.y;
       if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
       edit((ds) => {
-        const ns = ds.outline.nodes.slice();
+        const ns = stored(ds).slice();
+        if (fixed(d.i, ns.length)) return ds; // the headstock's two ends stay on the corners of the nut
         const n = { ...d.n0, x: d.n0.x + dx, y: d.n0.y + dy };
-        if (ds.outline.symmetric) { if (d.i === 0 || d.i === ns.length - 1) n.x = 0; else n.x = Math.min(n.x, -0.5); }
-        ns[d.i] = n;
-        return { ...ds, outline: { ...ds.outline, nodes: ns } };
+        if (sym) { if (d.i === 0 || d.i === ns.length - 1) n.x = 0; else n.x = Math.min(n.x, -0.5); }
+        if (open) n.y = Math.max(n.y, lift + 1);
+        ns[d.i] = down(n);
+        return store(ds, ns);
       }, T);
     } else if (d.kind === 'hin' || d.kind === 'hout') {
       edit((ds) => {
-        const ns = ds.outline.nodes.slice();
+        const ns = stored(ds).slice();
         let base = e.altKey ? { ...d.n0, k: 'c' } : d.n0;
         let hx = w.x - base.x, hy = w.y - base.y;
-        const center = ds.outline.symmetric && (d.i === 0 || d.i === ns.length - 1);
+        const center = sym && (d.i === 0 || d.i === ns.length - 1);
         if (center && base.k === 's') hy = 0;
-        ns[d.i] = setHandle(base, d.kind === 'hout' ? 'out' : 'in', hx, hy);
-        return { ...ds, outline: { ...ds.outline, nodes: ns } };
+        ns[d.i] = down(setHandle(base, d.kind === 'hout' ? 'out' : 'in', hx, hy));
+        return store(ds, ns);
       }, T);
     } else if (d.kind === 'pickup') {
       const free = e.altKey || Math.abs(d.p0.x) > 0.01;
@@ -177,13 +202,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     if (!t) { fit(); return; }
     if (t.dataset.k !== 'outline') return;
     const w = toWorld(e);
-    const hit = nearestOnNodes(nodes, w, !sym);
+    if ((t.dataset.of === 'head') !== (of === 'head')) { setSel(t.dataset.of === 'head' ? { kind: 'outline', of: 'head' } : { kind: 'outline' }); return; }
+    const hit = nearestOnNodes(nodes, w, closed);
     if (hit.seg === undefined) return;
-    const r = insertNode(nodes, hit.seg, hit.t, !sym);
+    const r = insertNode(nodes, hit.seg, hit.t, closed);
     begin();
-    edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: r.nodes } }));
+    edit((ds) => store(ds, r.nodes.map(down)));
     commit();
-    setSel({ kind: 'node', i: r.index });
+    setSel(pick({ kind: 'node', i: r.index }));
   };
 
   const onKey = (e) => {
@@ -197,12 +223,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     let next = null, nextSel;
     if (sel.kind === 'node') {
       const isCenter = sym && (sel.i === 0 || sel.i === nodes.length - 1);
+      const isFixed = fixed(sel.i, nodes.length);
       if (del) {
-        if (isCenter || nodes.length <= 3) return;
-        next = { ...design, outline: { ...design.outline, nodes: removeNode(nodes, sel.i) } };
-        nextSel = { kind: 'outline' };
+        if (isCenter || isFixed || nodes.length <= 3) return;
+        next = store(design, removeNode(cur.nodes, sel.i));
+        nextSel = pick({ kind: 'outline' });
       } else {
-        next = { ...design, outline: { ...design.outline, nodes: nodes.map((n, i) => (i === sel.i ? { ...n, x: isCenter ? 0 : (sym ? Math.min(n.x + dir[0] * step, -0.5) : n.x + dir[0] * step), y: n.y + dir[1] * step } : n)) } };
+        if (isFixed) return;
+        next = store(design, cur.nodes.map((n, i) => (i === sel.i ? { ...n, x: isCenter ? 0 : (sym ? Math.min(n.x + dir[0] * step, -0.5) : n.x + dir[0] * step), y: n.y + dir[1] * step } : n)));
       }
     } else {
       const key = { pickup: 'pickups', control: 'controls', cavity: 'cavities' }[sel.kind];
@@ -236,6 +264,8 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
   }, [show.grid, view, size.w, size.h, units]);
 
   // the arm bevel's line: right across the body, or between its squares when the cut is kept there
+  // the headstock's outline, flat and at its true shape, standing on the nut line
+  const headD = useMemo(() => (g.neck && g.neck.head ? nodesToSvgPath(g.neck.head.nodes.map((n) => ({ ...n, y: n.y + g.nutY })), false) + 'Z' : ''), [g.neck, g.nutY]);
   const armLine = useMemo(() => { const m = bevelPlane(design.contours.arm, g.outline, g.centroid); return m ? m.ends : null; }, [design.contours.arm, g.outline, g.centroid]);
   // where the belly cut's three squares sit: its middle, the end of its length, and its reach toward the body
   const bellyHandles = useMemo(() => {
@@ -248,11 +278,12 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
   const bellyEdge = useMemo(() => { const d = bellyDish(design.contours.belly); return d ? d.ellipse(1, 144) : null; }, [design.contours.belly]);
   const selNode = nodeSel >= 0 ? nodes[nodeSel] : null;
   const selNodeScreen = selNode ? S(selNode) : null;
-  const isCenterNode = (i) => sym && (i === 0 || i === nodes.length - 1);
+  const isCenterNode = (i) => (sym || open) && (i === 0 || i === nodes.length - 1);
   const NS = { vectorEffect: 'non-scaling-stroke' };
 
   const hint = editing
-    ? 'Drag points and handles · double-click the outline to add a point · Delete removes the selected point'
+    ? (of === 'head' ? 'Headstock, drawn flat at its true shape · drag points and handles · double-click its outline to add a point · its two ends stay on the nut'
+      : 'Drag points and handles · double-click the outline to add a point · Delete removes the selected point')
     : sel && sel.kind === 'pickup' ? 'Drag along the strings · hold Alt to move sideways · arrow keys nudge'
       : 'Click the outline to edit its shape · drag parts to move them · drag empty space to pan · scroll to zoom';
 
@@ -282,7 +313,9 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
               style={{ cursor: c.kind === 'cavity' ? 'move' : 'default' }} />
           ))}
 
-          <path d={outlineD} stroke={editing ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing ? 1.8 : 1.6} {...NS} style={{ pointerEvents: 'none' }} />
+          <path d={outlineD} stroke={editing && of === 'body' ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing && of === 'body' ? 1.8 : 1.6} {...NS} style={{ pointerEvents: 'none' }} />
+          {headD && <path d={headD} fill="var(--anvil)" fillOpacity=".5" stroke={editing && of === 'head' ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing && of === 'head' ? 1.8 : 1.4} {...NS} style={{ pointerEvents: 'none' }} />}
+          {headD && <path d={headD} stroke="transparent" strokeWidth="14" fill="none" {...NS} data-k="outline" data-of="head" style={{ cursor: 'pointer' }} />}
           <path d={outlineD} stroke="transparent" strokeWidth="14" {...NS} data-k="outline" style={{ cursor: 'pointer' }} />
 
           {armLine && <path d={`M${armLine[0].x} ${armLine[0].y}L${armLine[1].x} ${armLine[1].y}`} data-k="armline" stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="9 4" {...NS} clipPath="url(#bodyclip)" style={{ pointerEvents: 'none' }} />}
@@ -389,10 +422,10 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       {selNode && selNodeScreen && !drag.current && (
         <div className="float" style={{ left: Math.max(8, Math.min(size.w - 250, selNodeScreen.x + 16)), top: Math.max(8, Math.min(size.h - 50, selNodeScreen.y - 46)) }}>
           <div className="seg" role="group" aria-label="Point type">
-            <button type="button" className={selNode.k === 's' ? 'on' : ''} onClick={() => { begin(); edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: ds.outline.nodes.map((n, i) => (i === nodeSel ? setKind(n, 's') : n)) } })); commit(); }}>Smooth</button>
-            <button type="button" className={selNode.k === 'c' ? 'on' : ''} onClick={() => { begin(); edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: ds.outline.nodes.map((n, i) => (i === nodeSel ? setKind(n, 'c') : n)) } })); commit(); }}>Corner</button>
+            <button type="button" className={selNode.k === 's' ? 'on' : ''} onClick={() => { begin(); edit((ds) => store(ds, stored(ds).map((n, i) => (i === nodeSel ? setKind(n, 's') : n)))); commit(); }}>Smooth</button>
+            <button type="button" className={selNode.k === 'c' ? 'on' : ''} onClick={() => { begin(); edit((ds) => store(ds, stored(ds).map((n, i) => (i === nodeSel ? setKind(n, 'c') : n)))); commit(); }}>Corner</button>
           </div>
-          {!isCenterNode(nodeSel) && nodes.length > 3 && <button type="button" className="btn small" onClick={() => { begin(); edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: removeNode(ds.outline.nodes, nodeSel) } })); setSel({ kind: 'outline' }); commit(); }}>Delete point</button>}
+          {!isCenterNode(nodeSel) && nodes.length > 3 && <button type="button" className="btn small" onClick={() => { begin(); edit((ds) => store(ds, removeNode(stored(ds), nodeSel))); setSel(pick({ kind: 'outline' })); commit(); }}>Delete point</button>}
         </div>
       )}
 

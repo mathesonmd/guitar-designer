@@ -4,7 +4,7 @@ import { NECK_PRESETS, NECK_FIELDS } from '../data/necks.js';
 import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
-import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack } from '../model/design.js';
+import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack, makeHeadstock } from '../model/design.js';
 import { NECK_PROFILES, NECK_PROFILE_BASIS } from '../data/neckprofiles.js';
 import { setSymmetric, storedIndex } from '../core/path.js';
 import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
@@ -140,7 +140,26 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
               <Row label="Fullness of the shoulders" htmlFor="nb-full" basis={guess('A starting value with no source. No maker publishes numbers for the curve of a neck’s back. 2 is a half ellipse; higher fills out the shoulders, lower slims them.')}><Num id="nb-full" value={b.fullness} min={1.2} max={6} step={0.1} digits={1} onChange={(v) => setBack({ fullness: v })} /></Row>
               <Row label="Blend into the heel" htmlFor="nb-blend" basis={guess('A starting value with no source: the length over which the round back turns into the square heel.')}><Len id="nb-blend" units={u} value={b.blend} min={5} max={150} onChange={(v) => setBack({ blend: v })} /></Row>
               {made && <p className="note">Wood under the fretboard: <b className="mono">{fmtWithUnit(made.d1, u)}</b> deep at the 1st fret, <b className="mono">{fmtWithUnit(made.d12, u)}</b> at the 12th, and <b className="mono">{fmtWithUnit(made.heelDepth, u)}</b> at the heel (the pocket’s depth plus what stands above the body).</p>}
-              <p className="note">This is the shaft and the heel only, with a flat top where the fretboard is glued. Thickness is held from the nut to the 1st fret, runs straight to the 12th, and is held from there until the back blends into the heel. The neck widens in a straight line from the nut to the pocket’s width where it enters the body. <b>Not built yet:</b> the headstock and volute, the truss rod channel, and the heel’s screw holes. The headstock in the 3D view is only a stand-in.</p>
+              <p className="note">The neck has a flat top where the fretboard is glued. Thickness is held from the nut to the 1st fret, runs straight to the 12th, and is held from there until the back blends into the heel. The neck widens in a straight line from the nut to the pocket’s width where it enters the body.</p>
+              {(() => {
+                const hd = nk.head, shape = g.neck && g.neck.head;
+                const setHead = (patch) => change((d) => ({ ...d, neck: { ...d.neck, head: { ...d.neck.head, ...patch } } }));
+                const mine = (text) => <Basis kind="assumed" text={`A starting value with no source. ${text}`} />;
+                return (
+                  <>
+                    <h4 className="sub">Headstock</h4>
+                    <Row label=""><Check checked={!!hd.on} onChange={(v) => setHead({ on: v })}>Angled headstock with a volute</Check></Row>
+                    {hd.on && <Row label="Angle back from the neck" htmlFor="hs-angle" basis={mine('Set it to the angle you build to.')}><Num id="hs-angle" value={hd.angle} min={1} max={25} step={0.5} digits={1} suffix="°" onChange={(v) => setHead({ angle: v })} /></Row>}
+                    {hd.on && <Row label="Headstock thickness" htmlFor="hs-thick" basis={mine('Measure a headstock you like, or the tuners you will fit.')}><Len id="hs-thick" units={u} value={hd.thickness} min={6} max={30} onChange={(v) => setHead({ thickness: v })} /></Row>}
+                    {hd.on && <Row label="Volute height" htmlFor="hs-vh" basis={mine('How far the volute stands out from the back of the neck. 0 leaves it off.')}><Len id="hs-vh" units={u} value={hd.voluteHeight} min={0} max={15} onChange={(v) => setHead({ voluteHeight: v })} /></Row>}
+                    {hd.on && <Row label="Volute length" htmlFor="hs-vl" basis={mine('The length behind the nut over which the back swells out to the volute.')}><Len id="hs-vl" units={u} value={hd.voluteLength} min={5} max={120} onChange={(v) => setHead({ voluteLength: v })} /></Row>}
+                    {hd.on && <div className="addrow"><button className="btn small" onClick={() => { setSel({ kind: 'outline', of: 'head' }); }}>Reshape the headstock outline</button><button className="btn small" onClick={() => setHead({ outline: makeHeadstock().outline })}>Starting outline</button></div>}
+                    {hd.on && <p className="note">The headstock is a flat slab tilted back from the nut. Its outline is on the drawing above the nut, laid flat at its true shape: click it and drag its points like the body outline. Its two ends stay on the corners of the nut. The starting outline is only a shape to redraw.{shape ? <> It is <b className="mono">{fmtWithUnit(shape.length, u)}</b> long.</> : null}</p>}
+                    {hd.on && <p className="note">The volute is the swell on the back of the neck under the nut. Behind the nut the back deepens by the volute’s height over its length, then carries on at that depth until it has sunk into the back of the headstock.</p>}
+                    <p className="note"><b>Not built yet:</b> a flat (unangled) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes.{hd.on ? '' : ' With the headstock off, the neck ends square at the nut.'}</p>
+                  </>
+                );
+              })()}
             </>
           );
         })()}

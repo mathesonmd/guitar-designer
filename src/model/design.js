@@ -3,7 +3,7 @@
 // y = 0 on the scale line (exactly one scale length from the nut), +y toward the neck.
 import { NECK_PRESETS } from '../data/necks.js';
 import { BINDING_START, BELLY_BLEND_START, EDGE_BEVEL_START, PURFLING_START } from '../data/parts.js';
-import { NECK_PROFILES, NECK_SHAPE_START } from '../data/neckprofiles.js';
+import { NECK_PROFILES, NECK_SHAPE_START, HEADSTOCK_START, HEADSTOCK_OUTLINE_START } from '../data/neckprofiles.js';
 import { bellyParams } from './solid.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
@@ -120,6 +120,12 @@ export function makeNeckBack(profile) {
   return { profile: NECK_PROFILES[profile] ? profile : 'standardThin', t1: p.t1, t12: p.t12, ...NECK_SHAPE_START };
 }
 
+// The headstock: angled, with a volute, and an outline to redraw. `open` marks an outline whose two ends
+// are fixed (here, to the corners of the nut) with the points between them free.
+export function makeHeadstock() {
+  return { on: true, ...HEADSTOCK_START, outline: { open: true, nodes: HEADSTOCK_OUTLINE_START.map((n) => ({ ...n })) } };
+}
+
 export function makeBridge(type) {
   return { type, params: { ...(BRIDGES[type].params || {}) }, depths: {} };
 }
@@ -165,7 +171,7 @@ export function defaultDesign() {
     units: 'in',
     outline: JSON.parse(JSON.stringify(STARTERS.doublecut.outline)),
     body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, edgeBevel: { on: false, ...EDGE_BEVEL_START, roll: 0, purfling: false, purflingWidth: PURFLING_START.width, purflingDepth: PURFLING_START.depth }, wood: 'alder', customDensity: 500 },
-    neck: { ...applyNeckPreset({}, 'fender22'), back: makeNeckBack('standardThin') },
+    neck: { ...applyNeckPreset({}, 'fender22'), back: makeNeckBack('standardThin'), head: makeHeadstock() },
     strings: { count: 6, nutSpread: 1.375 * IN },
     compensation: { treble: 0.03 * IN, bass: 0.09 * IN },
     bridge: makeBridge('hipshot'),
@@ -202,6 +208,10 @@ export function normalizeDesign(raw) {
   out.body.edgeBevel = { ...d.body.edgeBevel, ...((raw.body || {}).edgeBevel || {}) };
   out.neck = { ...d.neck, ...(raw.neck || {}) };
   out.neck.back = { ...d.neck.back, ...((raw.neck || {}).back || {}) };
+  const rawHead = (raw.neck || {}).head;
+  out.neck.head = { ...d.neck.head, ...(rawHead || {}) };
+  if (!rawHead || !rawHead.outline || !Array.isArray(rawHead.outline.nodes) || rawHead.outline.nodes.length < 3) out.neck.head.outline = d.neck.head.outline;
+  else out.neck.head.outline = { open: true, nodes: rawHead.outline.nodes };
   out.strings = { ...d.strings, ...(raw.strings || {}) };
   out.compensation = { ...d.compensation, ...(raw.compensation || {}) };
   out.bridge = raw.bridge && BRIDGES[raw.bridge.type]

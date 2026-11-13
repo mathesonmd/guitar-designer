@@ -658,8 +658,9 @@ await step('a bevel around the top edge: drag a diamond for width, give a point 
   return `${count} diamonds; one dragged to ${s1.outline.nodes[low].bw.toFixed(1)} mm; STEP ${(fs.statSync(edge).size / 1024).toFixed(0)} KB`;
 });
 
-await step('the neck\'s back is shaped from a thickness profile and saved as a 3D model that sits in the pocket', async () => {
+await step('the neck: a back from a thickness profile, a headstock redrawn on the drawing, and a 3D model that sits in the pocket', async () => {
   await tab('Design'); await settle(400); await openSec('neck');
+  const n0len = (await state()).outline.nodes.length;
   const b0 = (await state()).neck.back;
   assert(b0.profile === 'standardThin' && Math.abs(b0.t1 - 20.32) < 1e-6, 'starts on the Standard Thin profile, 0.800 in at the 1st fret');
   await page.selectOption('#nb-profile', 'roundback59');
@@ -672,7 +673,27 @@ await step('the neck\'s back is shaped from a thickness profile and saved as a 3
   const b2 = (await state()).neck.back;
   assert(Math.abs(b2.t1 - 20.32) < 1e-6 && Math.abs(b2.fullness - 2.4) < 1e-6, 'profile restored, fullness stored');
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: the headstock and volute, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: a flat \(unangled\) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
+  const h0 = (await state()).neck.head;
+  assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
+  await page.locator('section[data-sec="neck"] button:has-text("Reshape the headstock outline")').click();
+  await settle(400);
+  const nut = h0 && (await state()).neck.scale;
+  const count = await page.locator('.stage [data-k="node"]').count();
+  assert(count === 9, `the headstock's nine points are shown (${count})`);
+  const before = (await state()).neck.head.outline.nodes;
+  await dragWorld({ x: before[4].x, y: before[4].y + nut }, { x: before[4].x + 12, y: before[4].y + nut + 25 });
+  const after = (await state()).neck.head.outline.nodes;
+  near(after[4].x, before[4].x + 12, 0.8, 'tip moved across'); near(after[4].y, before[4].y + 25, 0.8, 'tip moved along');
+  await dragWorld({ x: before[0].x, y: nut }, { x: before[0].x - 20, y: nut + 15 });
+  const pinned = (await state()).neck.head.outline.nodes;
+  assert(pinned[0].x === before[0].x && pinned[0].y === before[0].y, 'the end at the corner of the nut does not move');
+  assert((await state()).outline.nodes.length === n0len, 'the body outline was not touched');
+  await page.keyboard.press('Escape');
+  await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm');
+  const h1 = (await state()).neck.head;
+  assert(h1.angle === 12 && Math.abs(h1.voluteHeight - 5) < 1e-6, 'angle and volute height stored');
   await tab('3D'); await settle(1500);
   await page.click('.viewopts button:has-text("Back")'); await settle(600);
   await page.screenshot({ path: path.join(out, '3d-neck-back.png') });
@@ -680,12 +701,15 @@ await step('the neck\'s back is shaped from a thickness profile and saved as a 3
   await page.click('.viewopts button:has-text("Save files for CNC")');
   const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
   await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
-  assert(/3D model of the neck/i.test(await dlg.innerText()) && /The neck ends square at the nut/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
+  assert(/3D model of the neck/i.test(await dlg.innerText()) && /The headstock: .* tilted back 12° from the nut/.test(await dlg.innerText()) && /Not in the file: tuner holes/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
   files.neck = await saveDownload(() => dlg.locator('button:has-text("Save neck model (.step)")').click(), 120000);
   assert(fs.readFileSync(files.neck, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file of the neck saved');
+  fs.writeFileSync(path.join(dl, 'neck-design.json'), JSON.stringify(await state())); // the design this neck was saved from, for the independent check
   await dlg.locator('[data-k="neck-status"]:has-text("neck.step")').waitFor({ timeout: 5000 });
   await page.keyboard.press('Escape');
   await tab('Design'); await openSec('neck'); await setField('#nb-full', '2');
+  await page.locator('section[data-sec="neck"] button:has-text("Starting outline")').click();
+  await setField('#hs-angle', '14'); await setField('#hs-vh', '4 mm');
   return `neck STEP ${(fs.statSync(files.neck).size / 1024).toFixed(0)} KB`;
 });
 

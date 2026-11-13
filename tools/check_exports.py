@@ -405,10 +405,20 @@ for f in glob.glob(D + '/*-neck.step'):
     print('STEP', os.path.basename(f), len(N), 'entities')
     check(nkinds.count('MANIFOLD_SOLID_BREP') == 1, 'the neck is one solid')
     vs = [nums(N[refs(a)[0]][1])[-3:] for k, a in N.values() if k == 'VERTEX_POINT']
-    nk = design['neck']; T = design['body']['thickness']
+    nd = json.load(open(os.path.join(D, 'neck-design.json'))) if os.path.exists(os.path.join(D, 'neck-design.json')) else design  # the design as it was when the neck was saved
+    nk = nd['neck']; T = nd['body']['thickness']
     ys = [v[1] for v in vs]; zs = [v[2] for v in vs]; xs = [v[0] for v in vs]
-    check(abs(max(ys) - nk['scale']) < 1e-4 and abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4, 'it runs from the nut (one scale length from the scale line) to the end of the heel, %.2f mm' % (max(ys) - min(ys)))
-    check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4 and abs(min(zs) - (T - nk['pocketDepth'])) < 1e-4, 'its flat top stands %.3f mm above the body and its heel sits on the pocket floor' % nk['heelStandProud'])
-    check(abs((max(xs) - min(xs)) - nk['heelWidth']) < 1e-3, 'the heel is the pocket\'s width, %.3f mm' % nk['heelWidth'])
+    head = nk.get('head') or {}
+    if head.get('on'):
+        ang = math.radians(head['angle']); far = max(n['y'] for n in head['outline']['nodes'])
+        check(abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4 and abs(max(ys) - (nk['scale'] + far * math.cos(ang))) < 0.6, 'it runs from the end of the heel to the tip of the headstock, %.1f mm past the nut' % (max(ys) - nk['scale']))
+        check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4, 'its flat top stands %.3f mm above the body' % nk['heelStandProud'])
+        low = T + nk['heelStandProud'] - far * math.sin(ang) - head['thickness'] * math.cos(ang)
+        check(abs(min(zs) - low) < 0.6, 'the tip of the headstock hangs %.1f mm below the top: its angle and thickness are right' % (T + nk['heelStandProud'] - min(zs)))
+    else:
+        check(abs(max(ys) - nk['scale']) < 1e-4 and abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4, 'it runs from the nut (one scale length from the scale line) to the end of the heel, %.2f mm' % (max(ys) - min(ys)))
+        check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4 and abs(min(zs) - (T - nk['pocketDepth'])) < 1e-4, 'its flat top stands %.3f mm above the body and its heel sits on the pocket floor' % nk['heelStandProud'])
+    heel_x = [v[0] for v in vs if v[1] < nk['scale'] - nk['nutToHeel'] + nk['pocketLength'] + 1e-6]
+    check(abs((max(heel_x) - min(heel_x)) - nk['heelWidth']) < 1e-3, 'the heel is the pocket\'s width, %.3f mm' % nk['heelWidth'])
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)
