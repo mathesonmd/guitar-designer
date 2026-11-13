@@ -176,7 +176,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
             <button className="btn primary" disabled={!!busy} onClick={save}>{busy || `Save 3D model (.${kind})`}</button>
             {result && <span role="status" style={{ color: result.ok ? 'var(--bone)' : 'var(--torch)', fontSize: 12.5, flex: '1 1 260px' }}>{result.message}</span>}
           </div>
-          <p className="note">The first save fetches the 3D engine, a download of about 7 MB. After that, building the model takes a few seconds, and the page does not respond while it works. If a save fails that worked earlier in the same visit, reload the page and try again: after many models the 3D engine can run short of memory.</p>
+          <p className="note">The first save fetches the 3D engine, a download of about 6 MB. After that, building the model takes a few seconds, and the page does not respond while it works. If a save fails that worked earlier in the same visit, reload the page and try again: after many models the 3D engine can run short of memory.</p>
         </>
       )}
       {g.neck && (

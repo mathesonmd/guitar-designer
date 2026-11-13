@@ -96,6 +96,12 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   way of cutting pockets once gave a body 7% too heavy with no error at all.
 - No depth without a source applies here too: a hole with no recorded depth is left out of the STEP file
   and named in the save dialog, never drilled to a guess.
+- The neck's headstock (owner's decision, 13 November 2026): angled with a volute first, its outline
+  drawn in the app the way the body outline is; a flat (Fender-style) headstock is needed as well, after.
+  He said the first neck models "look really good for a first try".
+- Electric Herald is a collection of other people's drawings, mostly 1:1 PDFs, "left intact with respect
+  to original publishers", with accuracy not guaranteed and no license granting reuse. Do not bundle its
+  files or take built-in numbers from them. People can load their own downloads as reference overlays.
 - The direction (owner's decision, November 2026): this becomes a guitar-specific CAD/CAM tool. 2D stays
   the master for pockets so they cut crisply; 3D tools are for body contours, neck heels and volutes.
   Body first, then the neck.
@@ -136,7 +142,9 @@ where it measured exactly right: 326.00 x 472.74 x 44.45 mm, and the STL in Vect
 showed the same size and clean pockets, and the millimeter CNC vector files there too: layers, dotted
 layer names and true circles all came through; he also looked at the arm bevel, belly cut and rolled edge
 bevel there and found them smooth; inch files have only been re-read by our own checker);
-the 3D engine has never been fetched from the real CDN, only from a local copy in the tests; the published artifact has not been opened signed in;
+the real CDNs serve every library file, the 3D engine included, byte for byte the same as the copies the
+tests use, with the headers the loader needs (checked 13 November 2026; the engine is 5.7 MB compressed),
+but no browser has yet loaded the engine from them; the published artifact has not been opened signed in;
 touch gestures, Safari and Firefox are untried.
 
 **Waiting on the owner:**
@@ -144,9 +152,9 @@ touch gestures, Safari and Firefox are untried.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
-- The neck: whether the shaft-and-heel shape is right (half-ellipse back, straight thickness between the
-  1st and 12th frets, blend into a square heel), and what the headstock should be: flat like a Fender or
-  angled with a volute, and how its outline is drawn.
+- Whether the demo copies of the app work for him (the artifact, and `dist/index.html` opened from disk).
+- Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
+  collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.
 - Whether inch files import at the right size. (He confirmed in Aspire: the tapered edge bevel, the
   purfling lines, and that centering lines the vectors up with the model.)
@@ -163,6 +171,8 @@ touch gestures, Safari and Firefox are untried.
   when a 3D model is saved; `build.mjs` reads the versions from `package.json`, and `test/browser.mjs`
   serves the same files from `node_modules`. Change the two packages together: they are a matched pair.
 - Rebuild before committing so `dist/` matches `src/`.
+- Cloud sessions for this repository use the `guitar-designer` environment, which allows electricherald.com,
+  cdn.jsdelivr.net and cdnjs.cloudflare.com. `curl` reaches them; the WebFetch tool does not.
 - The owner's demo copy is the claude.ai artifact at https://claude.ai/artifact/5xPFL1MRmtKgMuWZZbzxC3
   (private to him). To refresh it, publish `dist/artifact.html` to that same link with the `downloads`
   capability, not as a new artifact.
