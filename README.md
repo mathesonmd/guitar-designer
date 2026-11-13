@@ -160,19 +160,30 @@ CAD solid; the 3D view draws the same cross-sections.
 - The headstock is a flat slab tilted back from the nut, to an outline drawn in the app. The outline is
   drawn flat, at its true shape, above the nut on the drawing, and edits like the body outline; its two
   ends are pinned to the corners of the nut (`outline.open`).
-- The neck turns into the headstock as one carved shape. Seen from the side, the back's line bends from
-  the neck's line into the headstock's, starting a third of the transition length behind the nut. Past
-  the nut the cross-sections lean back a little more each time (all their planes pass through one line
-  45 mm below the nut, so none cross inside the wood), widen with the outline and square up; at the end of
-  the transition length the section is the slab's own, and the slab takes over.
-- The volute is extra wood on the back's line, highest under the nut: smooth (a rounded hump) or peaked
-  (a crest across the back under the nut). The peaked one is not a narrow dart: across the neck it is as
-  round as the neck's back.
-- In the CAD solid the shaft and the transition are two smooth surfaces that share the cross-section at
-  the nut and are sewn there (fusing them took 7 seconds; sewing takes under half a second).
+- The back of the neck and the back of the headstock are one continuous surface. Seen from the side,
+  the back's line bends from the neck's line into the headstock's, starting a third of the transition
+  length behind the nut. Past the nut the cross-sections lean back a little more each time (all their
+  planes pass through one line 45 mm below the nut, so none cross inside the wood), widen and square up;
+  at the end of the transition length the section is the flat headstock's own, exactly.
+- Each section past the nut is drawn wider than the headstock and trimmed to the outline, the way a
+  headstock is sawn to its outline and carved after: its edges are square to its face, thin at the nut
+  and full thickness where the carve runs out.
+- The volute is a mound on the crown of the back, highest on the centerline under the nut. It dies away
+  to nothing, and level, at the neck's edges and along a rounded line toward the heel and toward the
+  headstock; each of those sides has its own length, so the two slopes can differ. Smooth is rounded over
+  the top; peaked comes to a point. It cannot reach past the end of the transition.
+- The CAD solid is built with no cutting or joining operations. The skin joins each cross-section to the
+  next with straight lines; sections are 1 mm apart wherever the shape is changing (within about 0.01 mm
+  of the true curve) and 10 mm apart on the plain shaft. The heel block and the flat of the headstock are
+  each drawn with one end open and stitched to the skin edge to edge, so there is no step at either.
+  A neck STEP file is about 17 MB for that reason.
+- Tried and given up, in this order: a headstock slab fused to the shaft (the owner: "unusable"); two
+  smooth surfaces sewn at the nut with the slab fused on (he saw a seam at the nut and a step at the
+  slab); one smooth surface trimmed by cuts (the engine returned a wrong solid about one time in three);
+  one smooth surface with stitched ends (it rippled on some settings while passing the engine's own check).
 - The neck's volume is the shaft by its cross-sections, the transition as the closed shape its sections
-  make when joined by straight lines, and the slab's area times its thickness. The CAD solid must match
-  it within 1.5% or it is not saved.
+  make when joined by straight lines, and the flat part's area times its thickness. The CAD solid must
+  match it within 1.5% or it is not saved; in a sweep of 48 randomized headstocks all were within 0.2%.
 - Not built: a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
 
 ## Not built yet

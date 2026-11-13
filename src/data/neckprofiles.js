@@ -22,10 +22,11 @@ export const NECK_SHAPE_START = { board: 0.25 * IN, fullness: 2, blend: 30 };
 //   angle         how far the headstock tilts back from the line of the neck, in degrees
 //   thickness     how thick the headstock is
 //   voluteHeight  how far the volute (the swell on the back, under the nut) stands out from the neck's back
-//   voluteLength  the length behind the nut over which the back swells out to the volute
-//   voluteStyle   'smooth' (a rounded hump) or 'peak' (a crest across the back, under the nut)
+//   voluteLength  how far the volute reaches from the nut toward the heel
+//   voluteAhead   how far it reaches from the nut toward the headstock (often shorter, so that side is steeper)
+//   voluteStyle   'smooth' (rounded over the top) or 'peak' (comes to a point under the nut)
 //   transition    the length past the nut over which the neck's round back becomes the headstock's flat one
-export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteStyle: 'smooth', transition: 45 };
+export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteAhead: 25, voluteStyle: 'smooth', transition: 45 };
 
 // A starting outline for the headstock: an original shape to redraw. It is drawn flat, at its true shape,
 // x across and y along the headstock's face from the nut. Its two ends are pinned to the corners of the

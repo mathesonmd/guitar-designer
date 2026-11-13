@@ -691,11 +691,11 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   assert(pinned[0].x === before[0].x && pinned[0].y === before[0].y, 'the end at the corner of the nut does not move');
   assert((await state()).outline.nodes.length === n0len, 'the body outline was not touched');
   await page.keyboard.press('Escape');
-  await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm');
+  await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm'); await setField('#hs-va', '30 mm');
   await page.locator('section[data-sec="neck"] button:has-text("Peaked")').click();
   const h1 = (await state()).neck.head;
-  assert(h1.angle === 12 && Math.abs(h1.voluteHeight - 5) < 1e-6 && Math.abs(h1.transition - 50) < 1e-6 && h1.voluteStyle === 'peak', 'angle, transition length, volute height and volute shape stored');
-  assert(/turns into the headstock as one carved shape/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says how the neck meets the headstock');
+  assert(h1.angle === 12 && Math.abs(h1.voluteHeight - 5) < 1e-6 && Math.abs(h1.transition - 50) < 1e-6 && Math.abs(h1.voluteAhead - 30) < 1e-6 && h1.voluteStyle === 'peak', 'angle, transition length, volute height, its length toward the headstock and its shape stored');
+  assert(/are one continuous surface/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says how the neck meets the headstock');
   await tab('3D'); await settle(1500);
   await page.click('.viewopts button:has-text("Back")'); await settle(600);
   await page.screenshot({ path: path.join(out, '3d-neck-back.png') });
@@ -703,7 +703,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   await page.click('.viewopts button:has-text("Save files for CNC")');
   const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
   await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
-  assert(/3D model of the neck/i.test(await dlg.innerText()) && /The headstock: .* tilted back 12° from the nut/.test(await dlg.innerText()) && /Not in the file: tuner holes/.test(await dlg.innerText()) && /The volute: peaked, standing out/.test(await dlg.innerText()) && /turns into the headstock over the/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
+  assert(/3D model of the neck/i.test(await dlg.innerText()) && /The headstock: .* tilted back 12° from the nut/.test(await dlg.innerText()) && /Not in the file: tuner holes/.test(await dlg.innerText()) && /The volute: peaked, standing out/.test(await dlg.innerText()) && /one continuous surface from the heel to the tip of the headstock/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
   files.neck = await saveDownload(() => dlg.locator('button:has-text("Save neck model (.step)")').click(), 120000);
   assert(fs.readFileSync(files.neck, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file of the neck saved');
   fs.writeFileSync(path.join(dl, 'neck-design.json'), JSON.stringify(await state())); // the design this neck was saved from, for the independent check
@@ -711,7 +711,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   await page.keyboard.press('Escape');
   await tab('Design'); await openSec('neck'); await setField('#nb-full', '2');
   await page.locator('section[data-sec="neck"] button:has-text("Starting outline")').click();
-  await setField('#hs-angle', '14'); await setField('#hs-vh', '4 mm'); await setField('#hs-tr', '45 mm');
+  await setField('#hs-angle', '14'); await setField('#hs-vh', '4 mm'); await setField('#hs-tr', '45 mm'); await setField('#hs-va', '25 mm');
   await page.locator('section[data-sec="neck"] button:has-text("Smooth")').click();
   return `neck STEP ${(fs.statSync(files.neck).size / 1024).toFixed(0)} KB`;
 });

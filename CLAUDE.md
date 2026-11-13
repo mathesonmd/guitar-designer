@@ -82,9 +82,9 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   solids, wrong volumes and a crash on some outlines, and took about 20 seconds when it worked. The 3D
   view derives the body with a coarser outline (tol 0.1) than the files do: anything that measures
   against the outline polygon must allow for that, or the picture and the file will differ.
-- The neck (`src/model/neck.js`) is cross-sections along its length; the CAD solid lofts through them
-  and must match their volume within 1%. Draw every cross-section with the same pieces, point for point,
-  or the loft fails. After dozens of builds in one process the engine starts failing on shapes it
+- The neck (`src/model/neck.js`) is cross-sections along its length; the CAD solid joins them with
+  straight lines and must match their volume within 1.5%. Draw every cross-section with the same pieces,
+  point for point, or the skin fails. After dozens of builds in one process the engine starts failing on shapes it
   normally builds (the neck tests have their own file for that reason); the dialog tells people to
   reload the page.
 - Contours live in `solid.js` as depth functions (`bevelPlane`, `bevelProfile`, `bellyDish`); `step.js`
@@ -102,11 +102,21 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   are stored from the nut line and shown `g.nutY` higher.
   He said the first neck models "look really good for a first try".
 - He called the first headstock "unusable": a slab stuck on a shaft, "glued to the other with no shaping".
-  The neck must turn into the headstock as one carved shape (`head.sections` in `neck.js`: the back's
-  side-view line bends from one into the other, the cross-sections widen with the outline and square up).
-  He also wants a peak under the nut as well as a smooth volute, and says a Fender neck is "more of a
-  transition to the headstock shape". Look at the back of the headstock in the 3D view ("Back of
-  headstock") before sending him any neck change: the first one was sent checked by numbers only.
+  The second still looked to him "like 3 independent shapes, each with a clunky transition": a seam at
+  the nut and a step where the flat began. His picture of it (13 November 2026): the back of the neck and
+  headstock is one surface; the volute is highest on the crown of the back and runs out completely flat
+  into the sides of the neck (no raised seam at the neck's edge); its slope toward the heel can be
+  shallower than its slope toward the headstock; its heel side is rounded like a U for the hand; many
+  have a peak under the nut; a Fender neck is "more of a transition to the headstock shape".
+- How the neck is built now (`neck.js`, `buildNeckSolid`): cross-sections every 1 mm where the shape
+  changes, joined by straight lines, with the heel block and the flat of the headstock stitched on edge
+  to edge. No cuts, no fuses. Do not go back to a smooth loft through many sections (it rippled on some
+  settings and still passed the engine's validity check), to trimming a lofted surface with cuts (wrong
+  one time in three), or to fusing blocks on (flawed one time in four). After any change to the neck,
+  run a sweep of randomized settings, not just the starting neck.
+- Look at the neck before sending him any change: the "Back of headstock" view in the app, and a shaded
+  rendering of the saved STL itself (he judges the STL in a shiny viewer, where seams show that the app's
+  picture hides). The first headstock was sent checked by numbers only.
 - Electric Herald is a collection of other people's drawings, mostly 1:1 PDFs, "left intact with respect
   to original publishers", with accuracy not guaranteed and no license granting reuse. Do not bundle its
   files or take built-in numbers from them. People can load their own downloads as reference overlays.
@@ -137,8 +147,8 @@ pockets and holes, in millimeters or inches; a 3D model of the body as STEP (tru
 mesh), with rolled or square edges and with or without the pockets; on/off switches for each edge
 roundover; a binding channel; hole depths entered per hardware; the neck as a 3D model: shaft and heel
 (thickness from Warmoth's published profiles, a flat top for the fretboard, a heel that fills the pocket)
-and an angled headstock, its outline drawn in the app, with a carved transition from the neck and a smooth or
-peaked volute.
+and an angled headstock, its outline drawn in the app, its back one surface with the neck's, with a smooth or
+peaked volute on the crown of the back.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
 carved tops, a flat (unangled) headstock, tuner holes, the nut slot, the neck's truss rod channel and
@@ -164,8 +174,9 @@ touch gestures, Safari and Firefox are untried.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
 - Whether the demo copies of the app work for him (the artifact, and `dist/index.html` opened from disk).
-- The headstock: whether the reworked transition and the two volutes look right (and whether "peak" means
-  a crest across the back, as built, or a narrow dart), and his numbers for angle, thickness, transition
+- The headstock: whether the third version reads as one shape; whether the volute's U toward the heel is
+  what he meant (built: its foot is a rounded line, reaching farthest down the neck on the centerline);
+  whether "peak" means a point on the crown, as built; and his numbers for angle, thickness, transition
   and volute.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.

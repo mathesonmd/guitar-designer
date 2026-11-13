@@ -128,10 +128,8 @@ export default function View3D({ design, g, solid, onSaveModel }) {
         st.extras.add(new THREE.Mesh(geo, mt));
       };
       const hd = neck.head;
-      // a smooth volute is shaded as one skin with the shaft; a peaked one keeps its crest at the nut
-      if (!hd) skin(neck.sections, true, false);
-      else if (hd.peaked) { skin(neck.sections, false, false); skin(hd.sections, false, false); }
-      else skin([...hd.sections.slice(1).reverse(), ...neck.sections], false, false);
+      // one skin from the end of the transition to the heel, so the back is shaded as the single surface it is
+      skin(hd ? [...hd.sections.slice(1).reverse(), ...neck.sections] : neck.sections, !hd, false);
       if (hd) {
         // past the transition, the slab at its true shape, tilted back about the nut line
         const shape = new THREE.Shape(hd.slab.map((p) => new THREE.Vector2(p.x, p.y)));

@@ -332,6 +332,22 @@ export function toSTL(shape, { units = 'mm' } = {}) {
   return { data, triangles: keep.length };
 }
 
+// Stitch faces and skins that meet edge to edge into one closed solid. Edges that should meet are
+// matched within a thousandth of a millimeter; if any edge is left with nothing to meet, it is not a
+// closed solid and nothing is returned.
+function stitch(rc, oc, parts) {
+  const sew = new oc.BRepBuilderAPI_Sewing(1e-3, true, true, true, false);
+  for (const p of parts) sew.Add(p.wrapped);
+  sew.Perform(new oc.Message_ProgressRange());
+  const open = sew.NbFreeEdges();
+  if (open > 0) { sew.delete(); throw new Error('open'); }
+  const shell = rc.cast(rc.downcast(sew.SewedShape()));
+  sew.delete();
+  const fix = new oc.ShapeFix_Solid(), solid = rc.cast(fix.SolidFromShell(shell.wrapped));
+  fix.delete();
+  return solid;
+}
+
 // The neck's shaft and heel as a CAD solid (model/neck.js says exactly what shape that is). The shaft is
 // one smooth surface through its cross-sections; the heel is a block with the pocket's own outline. The
 // shaft runs a little way into the block so the two join as one piece.
@@ -340,38 +356,67 @@ export function buildNeckSolid(rc, oc, neck, { expectVolume } = {}) {
   // Each cross-section's back is drawn as the same number of short curves, piece for piece, so the
   // sections pair up along the neck. A piece runs between two of the section's points, leaving and
   // arriving along the directions of the curve there.
-  const STEP = 3; // every third point of the section starts a new piece
+  const STEP = 3; // every third point of the back starts a new piece
+  // The points across a section's flat top: its two corners and evenly spaced points between, one for each piece of the back.
+  const topOf = (sec) => {
+    const P = sec.p3, A = P[0], B = P[P.length - 1], out = [A];
+    for (let i = STEP; i < 48; i += STEP) out.push(A.map((c, k) => c + ((B[k] - c) * i) / 48));
+    out.push(B);
+    return out;
+  };
   const wireOf = (sec) => {
-    const P = sec.p3, last = P.length - 1;
-    const dir = (i) => { const a = P[Math.max(0, i - 1)], b = P[Math.min(last, i + 1)], l = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) || 1; return [(b[0] - a[0]) / l, (b[1] - a[1]) / l, (b[2] - a[2]) / l]; };
-    const edges = [];
+    // p3 is: top corner, the back's 49 points, the other top corner. dirs gives the back's direction at each of the 49.
+    const P = sec.p3, B = P.slice(1, -1), last = B.length - 1, edges = [rc.makeLine(P[0], B[0])];
     for (let i = 0; i < last; i += STEP) {
-      const j = Math.min(last, i + STEP), a = P[i], b = P[j], ta = dir(i), tb = dir(j), h = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 3;
+      const j = Math.min(last, i + STEP), a = B[i], b = B[j], ta = sec.dirs[i], tb = sec.dirs[j], h = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]) / 3;
       edges.push(rc.makeBezierCurve([a, a.map((c, k) => c + ta[k] * h), b.map((c, k) => c - tb[k] * h), b]));
     }
-    edges.push(rc.makeLine(P[last], P[0]));
+    edges.push(rc.makeLine(B[last], P[P.length - 1]));
+    const t = topOf(sec);
+    for (let k = t.length - 1; k > 0; k--) edges.push(rc.makeLine(t[k], t[k - 1]));
     return rc.assembleWire(edges);
   };
-  let solid;
+  // A block pushed up from a flat outline, with one end left open: the faces of the block except the
+  // flat end that lies along y = seamY. That end's edges are broken into the same pieces as the section
+  // of the neck it meets, so the two can be stitched edge to edge with no step and no cutting.
+  const openBlock = (poly, seamY, z0, height) => {
+    const verts = fitArcs(poly, 0.01, true), out = [], onSeam = (q) => Math.abs(q.y - seamY) < 1e-6;
+    let split = 0;
+    for (let i = 0; i < verts.length; i++) {
+      const a = verts[i], b = verts[(i + 1) % verts.length];
+      out.push(a);
+      if (onSeam(a) && onSeam(b) && Math.abs(a.bulge || 0) < 1e-9) { split++; for (let k = STEP; k < 48; k += STEP) out.push({ x: a.x + ((b.x - a.x) * k) / 48, y: seamY, bulge: 0 }); }
+    }
+    const block = drawVerts(rc, out).sketchOnPlane('XY', z0).extrude(height), faces = block.faces.filter((f) => !(Math.abs(f.center.y - seamY) < 1e-6));
+    if (split !== 1 || faces.length !== block.faces.length - 48 / STEP) throw new Error('seam');
+    return faces;
+  };
+  let solid, stage = 'heel';
   try {
-    const along = [...neck.sections, neck.tail].map(wireOf);
-    let shaft;
-    const heel = prism(drawVerts(rc, fitArcs(neck.heel, 0.01, true)), neck.heelBottom, neck.top);
-    if (neck.head) {
-      const hd = neck.head, deg = (hd.ang * 180) / Math.PI;
-      // The transition is a second smooth surface, from the neck's own end at the nut to the headstock's
-      // square section. It starts on the very outline the shaft ends on, so the two skins are sewn there
-      // into one closed piece, and a peaked volute keeps its crest.
-      const past = [...hd.sections, hd.tail].map(wireOf);
-      shaft = rc.makeSolid([rc.makeFace(along[along.length - 1]), rc.loft(along, { ruled: false }, true), rc.loft(past, { ruled: false }, true), rc.makeFace(past[past.length - 1])]);
-      oc.BRepLib.OrientClosedSolid(shaft.wrapped);
-      if (!(rc.measureVolume(shaft) > 0)) throw new Error('inside out');
-      // the slab, drawn flat on the headstock's face, then tilted back about the nut line and moved to the nut
-      const slab = drawVerts(rc, fitArcs(hd.slab, 0.01, true)).sketchOnPlane('XY', -hd.thick).extrude(hd.thick)
-        .rotate(-deg, [0, 0, 0], [1, 0, 0]).translate([0, neck.nutY, neck.top]);
-      shaft = shaft.fuse(slab);
-    } else shaft = rc.loft(along, { ruled: false });
-    solid = shaft.fuse(heel);
+    // One skin through every cross-section, each joined to the next by straight lines, with its flat top
+    // and its edges drawn in from the start, so nothing is trimmed afterward. With a headstock it runs
+    // from the end of the transition, round the nut, to the heel. The sections are a millimeter apart
+    // wherever the shape is changing, which keeps the skin within about 0.01 mm of the true curve.
+    // (Tried first and given up: one smooth surface through all the sections, which the engine made
+    // ripple on some settings while still calling it sound; trimming a large carved surface with cuts,
+    // wrong about one time in three; joining the blocks on with cuts, flawed about one time in four.)
+    const hd = neck.head;
+    const run = (hd ? [...hd.sections.slice().reverse(), ...neck.sections.slice(1)] : neck.sections).map(wireOf);
+    // the heel block, open where the shaft meets it
+    const parts = [...openBlock(neck.heel, neck.shaftEnd, neck.heelBottom, neck.top - neck.heelBottom)];
+    stage = 'surface';
+    parts.push(rc.loft(run, { ruled: true }, true));
+    if (hd) {
+      // the flat of the headstock, drawn on its face from the end of the transition to the tip, open where
+      // the transition meets it; then tilted back about the nut line and moved to the nut
+      stage = 'flat';
+      const deg = (hd.ang * 180) / Math.PI;
+      for (const f of openBlock(hd.slab, hd.reach, -hd.thick, hd.thick)) parts.push(f.rotate(-deg, [0, 0, 0], [1, 0, 0]).translate([0, neck.nutY, neck.top]));
+    } else parts.push(rc.makeFace(run[0])); // no headstock: the neck ends square at the nut
+    stage = 'stitch';
+    solid = stitch(rc, oc, parts);
+    oc.BRepLib.OrientClosedSolid(solid.wrapped);
+    if (!(rc.measureVolume(solid) > 0)) throw new Error('inside out');
   } catch (err) {
     throw new Error('The neck could not be built from these settings. Try a blend length, a fullness, a volute or a transition length nearer the starting values, or a simpler headstock outline.');
   }
