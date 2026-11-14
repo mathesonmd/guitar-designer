@@ -30,8 +30,12 @@ export const NECK_SHAPE_START = { board: 0.25 * IN, fullness: 2, blend: 30 };
 //   tongueCove    the width of the hollow that runs from the tongue's edge out into the neck's round back
 //   side          the side view of the back when it is drawn: { on, points: [{ s, out, k }] } (see sideLine in
 //                 model/neck.js); off, the volute's numbers above are used
+//   tongueLine    the tongue's outline when it is drawn: { on, points: [{ s, w, k }] } (see tongueOutline in model/neck.js)
+//   kind          'angled' (tilted back from the nut) or 'flat' (level with the neck, its face stepped down)
+//   drop          flat only: how far the headstock's face is below the neck's top (the face the fretboard is glued to)
+//   scoop         flat only: the length past the nut over which the face curves down to that level
 //   transition    the length past the nut over which the neck's round back becomes the headstock's flat one
-export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteAhead: 25, voluteStyle: 'smooth', tongueTip: 'round', tongueCove: 8, transition: 45, side: { on: false, points: [] } };
+export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteAhead: 25, voluteStyle: 'smooth', tongueTip: 'round', tongueCove: 8, transition: 45, side: { on: false, points: [] }, tongueLine: { on: false, points: [] }, kind: 'angled', drop: 5, scoop: 22 };
 
 // A starting outline for the headstock: an original shape to redraw. It is drawn flat, at its true shape,
 // x across and y along the headstock's face from the nut. Its two ends are pinned to the corners of the

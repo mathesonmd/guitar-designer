@@ -138,6 +138,12 @@ export function makeSideLine(shape) {
   return [pt(-run, 0), pt(-run / 2, shape.bump(0.5, 0)), pt(0, h || 0, shape.peaked ? 'c' : 's'), pt(fall / 2, shape.bump(0.5, 0)), pt(fall, 0)];
 }
 
+// A drawn tongue outline to start from: the outline the numbers give now, as three points to drag.
+export function makeTongueLine(shape) {
+  const r = (v) => Math.round(v * 100) / 100, t = shape.tongue;
+  return [{ s: r(t.tip), w: 0, k: t.pointed ? 'c' : 's' }, { s: r(t.tip / 2), w: r(t.halfOf(t.tip / 2, 1)), k: 's' }, { s: 0, w: r(t.halfOf(0, 1)), k: 's' }];
+}
+
 export function makeBridge(type) {
   return { type, params: { ...(BRIDGES[type].params || {}) }, depths: {} };
 }

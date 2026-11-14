@@ -679,7 +679,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const b3 = (await state()).neck.back;
   assert(Math.abs(b3.t1 - 20.32) < 1e-9 && b3.profile === 'standardThin', `a box left without typing changes nothing (1st fret ${b3.t1})`);
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: drawing the tongue’s outline, a flat \(unangled\) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
   // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
   const h0 = (await state()).neck.head;
   assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
@@ -738,6 +738,34 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const ht = (await state()).neck.head;
   assert(ht.voluteStyle === 'tongue' && ht.tongueTip === 'point' && Math.abs(ht.tongueCove - 10) < 1e-6 && Math.abs(ht.voluteLength - 30) < 1e-6, 'tongue, its tip and its cove stored');
   assert(/The tongue is the flat back of the headstock carried down the back of the neck/.test(await page.locator('section[data-sec="neck"]').innerText()) && await page.locator('#hs-va').count() === 0, 'the panel describes the tongue and hides the volute-only setting');
+  // the tongue's outline, drawn: the first point is the tip, the others give its width
+  await page.locator('section[data-sec="neck"] button:has-text("Draw the tongue’s outline")').click(); await settle(500);
+  const tp = page.locator('.stage [data-k="tonguept"]');
+  assert(await page.locator('.stage [data-k="tongueview"]').count() === 1 && await tp.count() === 3, 'the tongue\'s outline opens with three points');
+  const tl0 = (await state()).neck.head.tongueLine;
+  assert(tl0.on && tl0.points[0].s === -30 && tl0.points[0].w === 0 && tl0.points[0].k === 'c' && tl0.points[2].s === 0, 'it starts from the tongue as the numbers had it: tip 30 mm behind the nut, pointed');
+  assert(await page.locator('#hs-vl').count() === 0, 'the panel hides the tip setting the drawn outline replaces');
+  const pull = async (i, dx, dy) => { const b = await tp.nth(i).boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await page.mouse.move(b.x + b.width / 2 + dx, b.y + b.height / 2 + dy, { steps: 6 }); await page.mouse.up(); await settle(300); };
+  await pull(1, 0, 20); // the middle point, pulled toward the centerline: narrower there
+  const tl1 = (await state()).neck.head.tongueLine;
+  assert(tl1.points[1].w < tl0.points[1].w - 1.5, `the tongue is narrower where the point was pulled in (${tl0.points[1].w} to ${tl1.points[1].w} mm)`);
+  await pull(0, -30, 25); // the tip slides along the centerline only
+  const tl2 = (await state()).neck.head.tongueLine;
+  assert(tl2.points[0].s < -33 && tl2.points[0].w === 0, 'the tip slides along the centerline and stays on it');
+  await tp.nth(0).click(); await settle(300);
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Round tip")').click();
+  assert((await state()).neck.head.tongueLine.points[0].k === 's', 'the tip can be made round');
+  await page.locator('.stage button:has-text("Done: back to the drawing")').click(); await settle(300);
+  await page.locator('section[data-sec="neck"] button:has-text("Outline back to the numbers")').click();
+  assert((await state()).neck.head.tongueLine.on === false && await page.locator('#hs-vl').count() === 1, 'back to the numbers switches the drawn outline off');
+  // a flat headstock: level with the neck, its face stepped down, with a scoop from the nut
+  await page.locator('section[data-sec="neck"] button:has-text("Flat")').click();
+  await setField('#hs-drop', '6 mm'); await setField('#hs-scoop', '25 mm');
+  const hf = (await state()).neck.head;
+  assert(hf.kind === 'flat' && Math.abs(hf.drop - 6) < 1e-6 && Math.abs(hf.scoop - 25) < 1e-6 && await page.locator('#hs-angle').count() === 0, 'flat, with its face 6 mm down and a 25 mm scoop; the angle setting is hidden');
+  assert(/level with the neck, its face stepped down below the neck’s top/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel describes the flat headstock');
+  await page.locator('section[data-sec="neck"] button:has-text("Angled back")').click();
+  assert((await state()).neck.head.kind === 'angled' && await page.locator('#hs-angle').count() === 1, 'and back to angled');
   await page.locator('section[data-sec="neck"] button:has-text("Peaked")').click();
   await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm'); await setField('#hs-va', '30 mm'); await setField('#hs-vl', '40 mm');
   const h1 = (await state()).neck.head;

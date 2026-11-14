@@ -136,7 +136,7 @@ export default function View3D({ design, g, solid, onSaveModel }) {
         const geo = new THREE.ExtrudeGeometry(shape, { depth: hd.thick, bevelEnabled: false, curveSegments: 1 });
         geo.translate(0, 0, -hd.thick);
         const mesh = new THREE.Mesh(geo, maple);
-        mesh.rotation.x = -hd.ang; mesh.position.set(0, g.nutY, neck.top);
+        mesh.rotation.x = -hd.ang; mesh.position.set(0, g.nutY, neck.top - hd.drop);
         st.extras.add(mesh);
       }
     }

@@ -43,7 +43,9 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
   const plain = [];
   for (let s = s0; s <= endS; s += 1) plain.push([s, hd.backZ(nutY + s) - top]);
   const path = (list) => list.map((p, i) => (i ? 'L' : 'M') + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ');
-  const body = `M${X(s0)} ${Y(0)} L${X(0)} ${Y(0)} L${X(s1)} ${Y(hd.faceZ(nutY + s1) - top)} ` + crown.slice().reverse().map((p) => 'L' + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ') + ' Z';
+  // the top: the neck's flat top, then the headstock's face (a straight slope when it is angled, a scoop down to a level face when it is flat)
+  const face = [[s0, 0], [0, 0]]; for (let s = 1; s <= s1; s += 1) face.push([s, hd.faceZ(nutY + s) - top]); face.push([s1, hd.faceZ(nutY + s1) - top]);
+  const body = path(face) + ' ' + crown.slice().reverse().map((p) => 'L' + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ') + ' Z';
   // where each point sits on the picture: on the crown of the section at its place along the neck
   const spot = (p) => { if (p.s <= 0) return [p.s, -neck.at(nutY + p.s).depth]; const c = hd.at(p.s).p3[25]; return [c[1] - nutY, c[2] - top]; };
   const fixedOut = (i) => i === last || (i === 0 && !free);
@@ -80,7 +82,7 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
     <div ref={wrap} style={{ position: 'absolute', inset: 0 }}>
       <svg ref={svg} data-k="sideview" width={size.w} height={size.h} style={{ display: 'block', touchAction: 'none' }} onPointerMove={move} onPointerUp={up} onPointerCancel={up} onDoubleClick={add} onPointerDown={() => setPick(null)}>
         <path d={body} fill="rgba(226,185,138,.13)" stroke="none" />
-        <path d={`M${X(s0)} ${Y(0)} L${X(0)} ${Y(0)} L${X(s1)} ${Y(hd.faceZ(nutY + s1) - top)}`} fill="none" stroke="var(--bone-dim, #9b9388)" strokeWidth="1.2" />
+        <path d={path(face)} fill="none" stroke="var(--bone-dim, #9b9388)" strokeWidth="1.2" />
         <path d={path(plain)} fill="none" stroke="var(--bone-dim, #9b9388)" strokeWidth="1" strokeDasharray="5 5" />
         <path d={path(crown)} data-k="sideline" fill="none" stroke="var(--ember, #e2642f)" strokeWidth="1.8" />
         <line x1={X(0)} y1={Y(0) - 16} x2={X(0)} y2={Y(0) + 6} stroke="var(--brass, #c8a45c)" strokeWidth="1.4" />

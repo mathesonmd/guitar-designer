@@ -163,6 +163,39 @@ export function sideLine(points, { freeStart = false, min = -150, max = 78 } = {
   return { points: pts, out, from: pts[0].s, to: pts[last].s, crest: pts[crest].s };
 }
 
+// The tongue's outline, as drawn: half its width at each place along from the nut, through points
+// { s, w, k }. The first point is the tip (no width there). A tip left smooth is round (the outline
+// leaves it square to the centerline, like the end of a U); a tip made a corner (k: 'c') is pointed.
+// Between the other points the line is smooth, never overshoots, and turns sharply only at a corner.
+export function tongueOutline(points, { min = -150, max = 78 } = {}) {
+  const pts = (points || []).map((p) => ({ s: Math.max(min, Math.min(max, +p.s || 0)), w: Math.max(0.5, Math.min(60, +p.w || 0)), k: p.k === 'c' ? 'c' : 's' })).sort((a, b) => a.s - b.s);
+  for (let i = pts.length - 1; i > 0; i--) if (pts[i].s - pts[i - 1].s < 1) pts.splice(i, 1);
+  if (pts.length < 2) return null;
+  const last = pts.length - 1, round = pts[0].k !== 'c';
+  pts[0].w = 0;
+  const sec = []; for (let i = 0; i < last; i++) sec.push((pts[i + 1].w - pts[i].w) / (pts[i + 1].s - pts[i].s));
+  const din = [], dout = [];
+  for (let i = 0; i <= last; i++) {
+    if (i === 0) { din.push(sec[0]); dout.push(sec[0]); continue; }
+    if (i === last) { din.push(0); dout.push(0); continue; } // it arrives at its last point running straight along the neck
+    if (pts[i].k === 'c') { din.push(sec[i - 1]); dout.push(sec[i]); continue; }
+    const a = sec[i - 1], b = sec[i], ha = pts[i].s - pts[i - 1].s, hb = pts[i + 1].s - pts[i].s;
+    const d = a * b <= 0 ? 0 : (3 * (ha + hb)) / ((2 * hb + ha) / a + (hb + 2 * ha) / b);
+    din.push(d); dout.push(d);
+  }
+  const herm = (t, a, da, b, db) => { const t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * da + (-2 * t3 + 3 * t2) * b + (t3 - t2) * db; };
+  const half = (sv) => {
+    if (sv <= pts[0].s) return 0;
+    if (sv >= pts[last].s) return pts[last].w;
+    let i = 0; while (sv > pts[i + 1].s) i++;
+    const h = pts[i + 1].s - pts[i].s, t = (sv - pts[i].s) / h;
+    // a round tip: the same kind of curve, but in the square root of the distance from the tip, which makes the outline leave the tip square to the centerline
+    if (i === 0 && round) return Math.max(0, herm(Math.sqrt(t), 0, Math.SQRT2 * pts[1].w, pts[1].w, 2 * h * din[1]));
+    return Math.max(0, herm(t, pts[i].w, h * dout[i], pts[i + 1].w, h * din[i + 1]));
+  };
+  return { points: pts, half, from: pts[0].s, to: pts[last].s, round };
+}
+
 // Area of that cross-section (the back curve closed by the flat top).
 const sectionArea = (pts) => Math.abs(signedArea(pts.map((p) => ({ x: p.x, y: p.z }))));
 
@@ -189,7 +222,15 @@ export function buildNeck(design, g) {
   const ease = (u) => { const s = Math.max(0, Math.min(1, u)); return s * s * (3 - 2 * s); };
   let head = null, zBack = null;
   if (h) {
-    const ang = (Math.max(1, Math.min(25, h.angle)) * Math.PI) / 180, sin = Math.sin(ang), cos = Math.cos(ang), tan = sin / cos;
+    // Two kinds of headstock. Angled: tilted back from the nut. Flat: level with the neck, its face stepped
+    // down below the neck's top, reached from the nut by a scoop (a hollow that is an arc of a circle seen
+    // from the side and straight across, as a sanding drum leaves it), level where it meets the face.
+    const level = h.kind === 'flat';
+    const ang = level ? 0 : (Math.max(1, Math.min(25, h.angle)) * Math.PI) / 180, sin = Math.sin(ang), cos = Math.cos(ang), tan = sin / cos;
+    const drop = level ? Math.max(0, Math.min(15, h.drop)) : 0, scoop = level ? Math.max(5, Math.min(60, h.scoop)) : 0;
+    const scoopRadius = drop > 0 ? (scoop * scoop + drop * drop) / (2 * drop) : 0;
+    // how far the face is below the neck's top at a place past the nut
+    const ramp = (v) => (!(drop > 0) || v <= 0 ? 0 : v >= scoop ? drop : drop - (scoopRadius - Math.sqrt(scoopRadius * scoopRadius - (scoop - v) * (scoop - v))));
     const thick = Math.max(6, Math.min(30, h.thickness)), rise = Math.max(0, Math.min(15, h.voluteHeight)), run = Math.max(5, Math.min(120, h.voluteLength));
     // the volute's length on the headstock side of the nut (it has to be gone by the end of the transition)
     const fallAsked = Math.max(5, Math.min(120, h.voluteAhead));
@@ -200,7 +241,8 @@ export function buildNeck(design, g) {
     const poly = flattenNodes(nodes, false, 0.02);
     const length = Math.max(...poly.map((p) => p.y));
     // the transition length, measured along the headstock's face from the nut
-    const reach = Math.max(20, Math.min(h.transition, 80, length * 0.6));
+    // (on a flat headstock it is never shorter than the scoop: the face must be level before the flat begins)
+    const reach = Math.max(level ? scoop + 5 : 0, Math.max(20, Math.min(h.transition, 80, length * 0.6)));
     const fall = Math.min(fallAsked, reach - 2);
     const behind = reach / 3;                       // the back starts to turn this far behind the nut
     const ahead = Math.max(5, reach * cos - thick * sin); // and has become the headstock's back this far past it
@@ -208,7 +250,7 @@ export function buildNeck(design, g) {
     const place = (x, v, w) => ({ x, y: g.nutY + v * cos - w * sin, z: top - v * sin - w * cos });
     // the side view of the back without the volute, as a height at each place along the neck
     zBack = (y) => {
-      const zn = top - shaftDepth(Math.min(y, g.nutY)), zh = top - (y - g.nutY) * tan - thick / cos;
+      const zn = top - shaftDepth(Math.min(y, g.nutY)), zh = top - (y - g.nutY) * tan - thick / cos - drop;
       return zn + ease((y - (g.nutY - behind)) / (behind + ahead)) * (zh - zn);
     };
     // The volute: a mound on the crown of the back, highest on the centerline under the nut. `along` is
@@ -257,7 +299,7 @@ export function buildNeck(design, g) {
     // The lean grows smoothly from nothing at the nut to the full angle over `fan`, so the sections turn
     // without a jerk at either end (a jerk shows as a faint line across a flat surface). `fan` is long
     // enough that no two sections cross anywhere within 30 mm below the face.
-    const fan = Math.min(reach, (1.5 * ang) / 0.03), nutHalf = nk.nutWidth / 2;
+    const fan = ang > 0 ? Math.min(reach, (1.5 * ang) / 0.03) : 1, nutHalf = nk.nutWidth / 2;
     // Each section is drawn wider than the headstock (by up to SPARE at the end of the transition; the
     // extra grows as the square of the distance from the nut, which makes the sawn edge's height grow
     // steadily from nothing instead of jumping up in the first millimeter) and
@@ -276,14 +318,17 @@ export function buildNeck(design, g) {
     // surface falls back to the neck's round back through a cove: a quarter circle in section, upright at
     // the tongue's edge and running out level into the neck.
     let tongue = null;
+    const line = flatStyle && h.tongueLine && h.tongueLine.on ? tongueOutline(h.tongueLine.points, { max: reach - 2 }) : null;
     if (flatStyle) {
-      const tip = side ? Math.min(-2, side.from) : -run, atNut = 0.8 * nutHalf, pw = h.tongueTip === 'point' ? 1.3 : 2, cove = Math.max(2, Math.min(25, h.tongueCove));
-      const spread = Math.min(reach, 1.5 * cove); // past the nut it reaches the headstock's full width within this length
+      const cove = Math.max(2, Math.min(25, h.tongueCove)), pw = line ? (line.round ? 2 : 1.3) : h.tongueTip === 'point' ? 1.3 : 2;
+      const tip = line ? line.from : side ? Math.min(-2, side.from) : -run, atNut = line ? line.half(0) : 0.8 * nutHalf;
+      const spread = Math.min(reach, 1.5 * cove); // past the nut (or past the end of a drawn outline) it reaches the headstock's full width within this length
       const halfOf = (sv, sign) => {
         if (sv <= tip) return 0;
+        const full = (from, at) => { const w = widths(Math.min(sv, reach)); return at + ((sign < 0 ? w.l : w.r) + SPARE - at) * ease((sv - from) / spread); };
+        if (line) return sv <= line.to ? line.half(sv) : full(line.to, line.half(line.to));
         if (sv <= 0) { const t = (sv - tip) / -tip; return atNut * (1 - (1 - t) ** pw) ** (1 / pw); }
-        const w = widths(Math.min(sv, reach));
-        return atNut + ((sign < 0 ? w.l : w.r) + SPARE - atNut) * ease(sv / spread);
+        return full(0, atNut);
       };
       const edge = [];
       for (const sign of [-1, 1]) {
@@ -318,11 +363,11 @@ export function buildNeck(design, g) {
         for (let k = 1; k <= 30; k++) { const d = (cove * k * k) / 900; near.push(l + d, r + d); }
         return { l, r, near };
       };
-      tongue = { tip, cove, spread, atNut, pointed: pw < 2, halfOf, inside, away, proud, coveAt, depthAt, flatAt, from: tip - cove - 1 };
+      tongue = { line, tip, cove, spread, atNut, pointed: pw < 2, halfOf, inside, away, proud, coveAt, depthAt, flatAt, from: tip - cove - 1 };
     }
     const station = (v) => {
       const th = ang * ease(v / fan), st = Math.sin(th), ct = Math.cos(th);
-      const oy = g.nutY + v * cos, oz = top - v * sin;
+      const oy = g.nutY + v * cos, oz = top - v * sin - ramp(v);
       let base;
       if (v >= reach) base = thick;
       else {
@@ -359,7 +404,7 @@ export function buildNeck(design, g) {
     }
     // (an outline point lying exactly on that line would otherwise appear twice)
     for (let i = slab.length - 1; i >= 0; i--) { const a = slab[i], b = slab[(i + 1) % slab.length]; if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) slab.splice(i, 1); }
-    head = { side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan };
+    head = { side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, line };
   }
   const at = (y) => {
     const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;

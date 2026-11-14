@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 80 geometry and export tests (Node, no browser)
+    npm test               # 82 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -197,6 +197,19 @@ CAD solid; the 3D view draws the same cross-sections.
   the first millimeter and left a line across the back.)
 - The neck's cross-sections are worked out only when something asks for them (the 3D view, the save
   dialog, the side view): deriving a design for the drawing takes about 4 ms without them and 70 with.
+- The tongue's outline can be drawn (`head.tongueLine`, `tongueOutline` in `neck.js`,
+  `src/ui/TongueView.jsx`): points give half the tongue's width at each place along from the nut; the
+  first is the tip. A tip left smooth is round (the width grows as the square root of the distance from
+  it, so the outline leaves the tip square to the centerline); a tip made a corner is pointed. The two
+  edges mirror each other. Past the last point the tongue spreads to the headstock's full width within
+  one and a half cove widths. While drawn it replaces the tip's position and shape.
+- A flat headstock (`head.kind === 'flat'`) is level with the neck with its face stepped down below
+  the neck's top by `drop`. From the nut the face curves down to that level through a scoop: an arc of
+  one circle seen from the side (radius = (scoop² + drop²) ÷ (2 × drop)), straight across, level where it
+  meets the face. Its sections stand upright (no lean), each with its top edge on the face; its back
+  curves down from the neck's line to the headstock's back, which is deeper. The transition is never
+  shorter than the scoop plus 5 mm. Everything else (volute, tongue, drawn lines, the stitched solid) is
+  the same code as the angled headstock with an angle of 0.
 - The CAD solid is built with no cutting or joining operations. The skin joins each cross-section to the
   next with straight lines; sections are 1 mm apart wherever the shape is changing (within about 0.01 mm
   of the true curve) and 10 mm apart on the plain shaft. The heel block and the flat of the headstock are
@@ -209,7 +222,7 @@ CAD solid; the 3D view draws the same cross-sections.
 - The neck's volume is the shaft by its cross-sections, the transition as the closed shape its sections
   make when joined by straight lines, and the flat part's area times its thickness. The CAD solid must
   match it within 1.5% or it is not saved; in a sweep of 48 randomized headstocks all were within 0.2%.
-- Not built: drawing the tongue's outline, a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
+- Not built: tuner holes, nut slot, truss rod channel, heel screw holes.
 
 ## Not built yet
 

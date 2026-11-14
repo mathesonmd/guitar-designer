@@ -411,7 +411,7 @@ export function buildNeckSolid(rc, oc, neck, { expectVolume } = {}) {
       // the transition meets it; then tilted back about the nut line and moved to the nut
       stage = 'flat';
       const deg = (hd.ang * 180) / Math.PI;
-      for (const f of openBlock(hd.slab, hd.reach, -hd.thick, hd.thick)) parts.push(f.rotate(-deg, [0, 0, 0], [1, 0, 0]).translate([0, neck.nutY, neck.top]));
+      for (const f of openBlock(hd.slab, hd.reach, -hd.thick, hd.thick)) parts.push((deg ? f.rotate(-deg, [0, 0, 0], [1, 0, 0]) : f).translate([0, neck.nutY, neck.top - hd.drop]));
     } else parts.push(rc.makeFace(run[0])); // no headstock: the neck ends square at the nut
     stage = 'stitch';
     solid = stitch(rc, oc, parts);

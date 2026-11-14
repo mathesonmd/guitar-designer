@@ -187,10 +187,10 @@ export default function Model3DDialog({ design, onClose, toast }) {
             <li>A flat top, where the fretboard is glued. The fretboard and frets are not part of it.</li>
             <li>The back: {both(g.neck.d1)} of wood at the 1st fret and {both(g.neck.d12)} at the 12th, blending over {both(g.neck.blend)} into the heel.</li>
             <li>The heel: a block {both(g.neck.heelDepth)} deep with the pocket’s own outline. It is {both(g.neck.length)} from the nut to the end of the heel.</li>
-            {g.neck.head && <li>The headstock: {both(g.neck.head.thick)} thick, tilted back {+((g.neck.head.ang * 180) / Math.PI).toFixed(1)}° from the nut, {both(g.neck.head.length)} long, to the outline you drew.</li>}
+            {g.neck.head && <li>The headstock: {both(g.neck.head.thick)} thick, {g.neck.head.level ? <>level with the neck, its face {both(g.neck.head.drop)} below the neck’s top, reached by a scoop {both(g.neck.head.scoop)} long</> : <>tilted back {+((g.neck.head.ang * 180) / Math.PI).toFixed(1)}° from the nut</>}, {both(g.neck.head.length)} long, to the outline you drew.</li>}
             {g.neck.head && <li>The back is one continuous surface from the heel to the tip of the headstock; it turns from round to flat over the {both(g.neck.head.reach)} past the nut.</li>}
             {g.neck.head && (g.neck.head.tongue
-              ? <li>The tongue: the flat of the headstock’s back carried {both(-g.neck.head.tongue.tip)} down the neck behind the nut to a {g.neck.head.tongue.pointed ? 'pointed' : 'round'} tip, standing out {both(g.neck.head.rise)} from the crown, with a cove {both(g.neck.head.tongue.cove)} wide outside its edge.</li>
+              ? <li>The tongue: the flat of the headstock’s back carried {both(-g.neck.head.tongue.tip)} down the neck behind the nut to a {g.neck.head.tongue.pointed ? 'pointed' : 'round'} tip{g.neck.head.tongue.line ? ', to the outline you drew' : ''}, standing out {both(g.neck.head.rise)} from the crown, with a cove {both(g.neck.head.tongue.cove)} wide outside its edge.</li>
               : g.neck.head.rise > 0
                 ? <li>The volute: {g.neck.head.peaked ? 'peaked' : 'smooth'}, standing out {both(g.neck.head.rise)} on the centerline under the nut, reaching {both(g.neck.head.run)} toward the heel and {both(g.neck.head.fall)} toward the headstock.</li>
                 : <li>No volute.</li>)}

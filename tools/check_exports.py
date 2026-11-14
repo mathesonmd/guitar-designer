@@ -410,10 +410,11 @@ for f in glob.glob(D + '/*-neck.step'):
     ys = [v[1] for v in vs]; zs = [v[2] for v in vs]; xs = [v[0] for v in vs]
     head = nk.get('head') or {}
     if head.get('on'):
-        ang = math.radians(head['angle']); far = max(n['y'] for n in head['outline']['nodes'])
+        flat = head.get('kind') == 'flat'  # a flat headstock is level with the neck, its face stepped down
+        ang = 0.0 if flat else math.radians(head['angle']); far = max(n['y'] for n in head['outline']['nodes'])
         check(abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4 and abs(max(ys) - (nk['scale'] + far * math.cos(ang))) < 0.6, 'it runs from the end of the heel to the tip of the headstock, %.1f mm past the nut' % (max(ys) - nk['scale']))
         check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4, 'its flat top stands %.3f mm above the body' % nk['heelStandProud'])
-        low = T + nk['heelStandProud'] - far * math.sin(ang) - head['thickness'] * math.cos(ang)
+        low = T + nk['heelStandProud'] - far * math.sin(ang) - head['thickness'] * math.cos(ang) - (head.get('drop', 0) if flat else 0)
         check(abs(min(zs) - low) < 0.6, 'the tip of the headstock hangs %.1f mm below the top: its angle and thickness are right' % (T + nk['heelStandProud'] - min(zs)))
     else:
         check(abs(max(ys) - nk['scale']) < 1e-4 and abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4, 'it runs from the nut (one scale length from the scale line) to the end of the heel, %.2f mm' % (max(ys) - min(ys)))
