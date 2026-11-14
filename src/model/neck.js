@@ -73,7 +73,7 @@ export function backCurve(halfWidth, depth, n, count = 48, right = halfWidth) {
 // sawn edge where the section is trimmed, and a bare EDGE of the curve itself where it is not.
 const EDGE = 0.05, FLAT_STEPS = 6, OUTER_STEPS = 18;
 function sampled(left, depth, n, right, shift, to3, limit, flat) {
-  const FINE = 300, c = 2 ** (-1 / n); // the curve is traced by x across its crown and by z down its sides
+  const FINE = 150, c = 2 ** (-1 / n); // the curve is traced by x across its crown and by z down its sides
   const dist = (a, b) => Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
   const half = (w, sign, wide, near) => {
     const base = (x) => ({ x: sign * x, z: -depth * (1 - Math.min(1, x / w) ** n) ** (1 / n) });
@@ -127,6 +127,40 @@ function sampled(left, depth, n, right, shift, to3, limit, flat) {
   const all = [...L.out.slice(1).reverse().map((q) => ({ p: q.p, p3: q.p3, din: neg(q.b), dout: neg(q.a) })), { p: R.out[0].p, p3: R.out[0].p3, din: neg(L.out[0].b), dout: R.out[0].b }, ...R.out.slice(1).map((q) => ({ p: q.p, p3: q.p3, din: q.a, dout: q.b }))];
   const pts = [L.corner, ...all.map((q) => q.p), R.corner];
   return { pts, p3: [to3(L.corner), ...all.map((q) => q.p3), to3(R.corner)], din: all.map((q) => q.din), dout: all.map((q) => q.dout) };
+}
+
+// The side view of the back, as drawn: a smooth line through points, each `s` millimeters along from
+// the nut (negative toward the heel) and standing `out` millimeters from the plain line of the back
+// there (the line the back takes with no volute). Returns out(s): nothing outside the points, level
+// where it leaves and rejoins the plain line, passing through every point, never overshooting between
+// two of them, and turning sharply only at a point marked as a corner (k: 'c').
+// `freeStart` leaves the first point where it was drawn (a tongue's tip stands proud); otherwise both
+// ends sit on the plain line.
+export function sideLine(points, { freeStart = false, min = -150, max = 78 } = {}) {
+  const pts = (points || []).map((p) => ({ s: Math.max(min, Math.min(max, +p.s || 0)), out: Math.max(-6, Math.min(15, +p.out || 0)), k: p.k === 'c' ? 'c' : 's' })).sort((a, b) => a.s - b.s);
+  for (let i = pts.length - 1; i > 0; i--) if (pts[i].s - pts[i - 1].s < 1) pts.splice(i, 1); // two points on one spot
+  if (pts.length < 2) return null;
+  const last = pts.length - 1;
+  pts[last].out = 0; if (!freeStart) pts[0].out = 0;
+  // the slope arriving at and leaving each point
+  const sec = []; for (let i = 0; i < last; i++) sec.push((pts[i + 1].out - pts[i].out) / (pts[i + 1].s - pts[i].s));
+  const din = [], dout = [];
+  for (let i = 0; i <= last; i++) {
+    if (i === 0 || i === last) { din.push(0); dout.push(0); continue; }
+    if (pts[i].k === 'c') { din.push(sec[i - 1]); dout.push(sec[i]); continue; }
+    const a = sec[i - 1], b = sec[i], ha = pts[i].s - pts[i - 1].s, hb = pts[i + 1].s - pts[i].s;
+    const d = a * b <= 0 ? 0 : (3 * (ha + hb)) / ((2 * hb + ha) / a + (hb + 2 * ha) / b); // level over a crest, never past either neighbor
+    din.push(d); dout.push(d);
+  }
+  const out = (sv) => {
+    if (sv <= pts[0].s) return freeStart ? pts[0].out : 0;
+    if (sv >= pts[last].s) return 0;
+    let i = 0; while (sv > pts[i + 1].s) i++;
+    const h = pts[i + 1].s - pts[i].s, t = (sv - pts[i].s) / h, t2 = t * t, t3 = t2 * t;
+    return (2 * t3 - 3 * t2 + 1) * pts[i].out + (t3 - 2 * t2 + t) * h * dout[i] + (-2 * t3 + 3 * t2) * pts[i + 1].out + (t3 - t2) * h * din[i + 1];
+  };
+  let crest = 0; for (let i = 1; i <= last; i++) if (Math.abs(pts[i].out) > Math.abs(pts[crest].out)) crest = i;
+  return { points: pts, out, from: pts[0].s, to: pts[last].s, crest: pts[crest].s };
 }
 
 // Area of that cross-section (the back curve closed by the flat top).
@@ -187,6 +221,25 @@ export function buildNeck(design, g) {
       if (!(rise > 0) || r >= 1 || flatStyle) return 0;
       return rise * (peaked ? (1 - r) ** 1.5 : (1 - r * r) ** 2);
     };
+    // With the side view drawn, the drawn line takes the place of the volute's height, lengths and shape.
+    // It gives how far the back stands out along the centerline; away from the centerline that falls off
+    // the same way the mound does, so its foot is still a rounded line and it still arrives level at the
+    // neck's edges. (For a tongue the drawn line is the height of the tongue's flat instead.)
+    const side = h.side && h.side.on ? sideLine(h.side.points, { freeStart: flatStyle, max: reach - 2 }) : null;
+    const swell = (sv, across) => {
+      if (flatStyle) return 0; // a tongue is not a mound: its height is handled with its flat
+      if (!side) return bump(sv < 0 ? -sv / run : sv / fall, across);
+      // The drawn line can have a different shape on each side of its highest point. Away from the
+      // centerline the two are blended by direction (all heel-side shape looking toward the heel, all
+      // headstock-side shape looking toward the headstock, half and half straight across), so the
+      // surface has no crease where the two sides meet.
+      const toHeel = side.crest - side.from, toHead = side.to - side.crest;
+      const a = sv < side.crest ? (sv - side.crest) / toHeel : (sv - side.crest) / toHead, r = Math.hypot(a, across);
+      if (r >= 1) return 0;
+      if (r < 1e-9) return side.out(side.crest);
+      const w = (1 + a / r) / 2;
+      return (1 - w) * side.out(side.crest - r * toHeel) + w * side.out(side.crest + r * toHead);
+    };
     // the outline's reach to the bass and treble sides at a place along the face
     const widths = (v) => {
       if (v <= 1e-9) return { l: nk.nutWidth / 2, r: nk.nutWidth / 2 };
@@ -205,7 +258,9 @@ export function buildNeck(design, g) {
     // without a jerk at either end (a jerk shows as a faint line across a flat surface). `fan` is long
     // enough that no two sections cross anywhere within 30 mm below the face.
     const fan = Math.min(reach, (1.5 * ang) / 0.03), nutHalf = nk.nutWidth / 2;
-    // Each section is drawn wider than the headstock (by up to SPARE at the end of the transition) and
+    // Each section is drawn wider than the headstock (by up to SPARE at the end of the transition; the
+    // extra grows as the square of the distance from the nut, which makes the sawn edge's height grow
+    // steadily from nothing instead of jumping up in the first millimeter) and
     // then trimmed to the outline, the way a headstock is sawn to its outline and its back carved after:
     // the edge of the headstock is thin at the nut and reaches full thickness as the carve runs out.
     const SPARE = Math.min(14, 0.3 * reach);
@@ -222,7 +277,7 @@ export function buildNeck(design, g) {
     // the tongue's edge and running out level into the neck.
     let tongue = null;
     if (flatStyle) {
-      const tip = -run, atNut = 0.8 * nutHalf, pw = h.tongueTip === 'point' ? 1.3 : 2, cove = Math.max(2, Math.min(25, h.tongueCove));
+      const tip = side ? Math.min(-2, side.from) : -run, atNut = 0.8 * nutHalf, pw = h.tongueTip === 'point' ? 1.3 : 2, cove = Math.max(2, Math.min(25, h.tongueCove));
       const spread = Math.min(reach, 1.5 * cove); // past the nut it reaches the headstock's full width within this length
       const halfOf = (sv, sign) => {
         if (sv <= tip) return 0;
@@ -250,7 +305,7 @@ export function buildNeck(design, g) {
         return best;
       };
       const inside = (x, sv) => sv > tip && x > -halfOf(sv, -1) && x < halfOf(sv, 1);
-      const proud = (sv) => rise * (sv <= 0 ? 1 : 1 - ease(sv / reach));
+      const proud = (sv) => (side ? side.out(sv) : rise * (sv <= 0 ? 1 : 1 - ease(sv / reach)));
       const wall = (u) => (u >= 1 ? 0 : 1 - Math.sqrt(1 - (1 - u) * (1 - u)));
       // The cove is as wide as set where there is room, and narrower where the tongue's edge is close to
       // the edge of the neck or headstock (`room` is the half-width there), so that it always runs out
@@ -275,11 +330,11 @@ export function buildNeck(design, g) {
         for (let k = 0; k < 50; k++) { const t = (lo + hi) / 2; if (oz - t * ct > zBack(oy - t * st)) lo = t; else hi = t; }
         base = (lo + hi) / 2;
       }
-      const w = widths(Math.min(v, reach)), spare = SPARE * Math.min(1, v / reach), n = fullness * (SQUARE / fullness) ** ease(v / reach);
+      const w = widths(Math.min(v, reach)), spare = SPARE * Math.min(1, v / reach) ** 2, n = fullness * (SQUARE / fullness) ** ease(v / reach);
       const to3 = (p) => [p.x, oy + p.z * st, oz + p.z * ct];
-      const shift = tongue ? (p) => { p.z = -tongue.depthAt(p.x, v, -p.z, base, p.x < 0 ? w.l : w.r); } : (p) => { p.z -= bump(v / fall, Math.abs(p.x) / nutHalf); };
+      const shift = tongue ? (p) => { p.z = -tongue.depthAt(p.x, v, -p.z, base, p.x < 0 ? w.l : w.r); } : (p) => { p.z -= swell(v, Math.abs(p.x) / nutHalf); };
       let { pts, p3, din, dout } = sampled(w.l + spare, base, n, w.r + spare, shift, to3, v > 0 ? limit : null, tongue ? tongue.flatAt(v) : null);
-      if (v >= reach && !(bump(v / fall, 0) > 0)) {
+      if (v >= reach) {
         // the end of the transition is the flat part's own section, exactly: square corners and a straight back,
         // so the flat part can be stitched on edge to edge
         pts = [{ x: -w.l, z: 0 }];
@@ -287,12 +342,14 @@ export function buildNeck(design, g) {
         pts.push({ x: w.r, z: 0 });
         p3 = pts.map(to3); din = dout = pts.slice(1, -1).map(() => [1, 0, 0]);
       }
-      return { v, y: oy, left: w.l, right: w.r, spare, base, depth: tongue ? tongue.depthAt(0, v, base, base, w.r) : base + bump(v / fall, 0), n, pts, din, dout, p3 };
+      return { v, y: oy, left: w.l, right: w.r, spare, base, depth: tongue ? tongue.depthAt(0, v, base, base, w.r) : base + swell(v, 0), n, pts, din, dout, p3 };
     };
     // a section every STRIP through the transition
     const count = Math.max(8, Math.round(reach / STRIP)), vs = [];
     for (let k = 0; k <= count; k++) vs.push((reach * k) / count);
-    const sections = vs.map((v) => station(v));
+    // (worked out only when something asks for them: the drawing of the outline does not need them)
+    let made = null;
+    const sectionsOf = () => made || (made = vs.map((v) => station(v)));
     // the flat part: the outline from the end of the transition on
     const slab = [];
     for (let i = 0, m = poly.length; i < m; i++) {
@@ -302,7 +359,7 @@ export function buildNeck(design, g) {
     }
     // (an outline point lying exactly on that line would otherwise appear twice)
     for (let i = slab.length - 1; i >= 0; i--) { const a = slab[i], b = slab[(i + 1) % slab.length]; if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) slab.splice(i, 1); }
-    head = { tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, sections, faceZ: (y) => top - (y - g.nutY) * tan };
+    head = { side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan };
   }
   const at = (y) => {
     const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;
@@ -320,9 +377,9 @@ export function buildNeck(design, g) {
       return { y, half, base: heelDepth, depth: heelDepth, n, pts, p3: pts.map(to3), din: flatDir, dout: flatDir };
     }
     const sv = y - g.nutY, tg = head && head.tongue && sv > head.tongue.from ? head.tongue : null;
-    const shift = tg ? (p) => { p.z = -tg.depthAt(p.x, sv, -p.z, depth, half); } : head ? (p) => { p.z -= head.bump(-sv / head.run, Math.abs(p.x) / half); } : null;
+    const shift = tg ? (p) => { p.z = -tg.depthAt(p.x, sv, -p.z, depth, half); } : head ? (p) => { p.z -= head.swell(sv, Math.abs(p.x) / half); } : null;
     const { pts, p3, din, dout } = sampled(half, depth, n, half, shift, to3, null, tg ? tg.flatAt(sv) : null);
-    return { y, half, base: depth, depth: tg ? tg.depthAt(0, sv, depth, depth, half) : depth + (head ? head.bump(-sv / head.run, 0) : 0), n, pts, p3, din, dout };
+    return { y, half, base: depth, depth: tg ? tg.depthAt(0, sv, depth, depth, half) : depth + (head ? head.swell(sv, 0) : 0), n, pts, p3, din, dout };
   };
   // Stations: one every STRIP where the shape is changing (the volute, the turn into the headstock, the
   // blend into the heel), and every 10 mm along the plain shaft, with one at each of the 1st and 12th
@@ -330,7 +387,7 @@ export function buildNeck(design, g) {
   const ys = [], blendTop = shaftEnd + blend;
   let from = g.nutY;
   if (head) {
-    from = g.nutY - Math.max(head.tongue ? -head.tongue.from : head.run, head.behind);
+    from = g.nutY - head.backFrom;
     const k = Math.round((g.nutY - from) / STRIP);
     for (let i = 0; i < k; i++) ys.push(g.nutY - ((g.nutY - from) * i) / k);
   }
@@ -339,13 +396,15 @@ export function buildNeck(design, g) {
   ys.push(...plain.sort((a, b) => b - a).filter((y, i, a) => !i || a[i - 1] - y > 0.5));
   const kb = Math.max(8, Math.round(blend / STRIP));
   for (let i = 0; i <= kb; i++) ys.push(blendTop - (blend * i) / kb);
-  const sections = ys.map(at);
+  let shaftMade = null;
+  const sectionsOf = () => shaftMade || (shaftMade = ys.map(at)); // worked out only when asked for
   // the heel block: the pocket's own outline from its end wall up to where the shaft meets it
   const heel = g.pocketTo(shaftEnd);
   // volume: the shaft by its cross-sections, plus the heel block, plus the headstock (the transition as
   // the closed shape its cross-sections make when joined by straight lines, and the slab past it)
   const measure = () => {
     let shaft = 0;
+    const sections = sectionsOf();
     for (let i = 0; i < sections.length - 1; i++) {
       const a = sectionArea(sections[i].pts), c = sectionArea(sections[i + 1].pts);
       shaft += ((a + c + Math.sqrt(a * c)) / 3) * (sections[i].y - sections[i + 1].y);
@@ -371,7 +430,7 @@ export function buildNeck(design, g) {
   };
   let measured = null;
   return {
-    top, heelBottom: top - heelDepth, heelDepth, shaftEnd, blend, board, fullness, d1, d12, y1, y12, at, sections, heel, halfAt, head,
+    top, heelBottom: top - heelDepth, heelDepth, shaftEnd, blend, board, fullness, d1, d12, y1, y12, at, get sections() { return sectionsOf(); }, heel, halfAt, head,
     length: g.nutY - g.heelY, nutY: g.nutY,
     // worked out only when asked for: it takes a moment, and the drawing does not need it
     get volume() { if (!measured) measured = measure(); return measured.volume; },

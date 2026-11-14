@@ -18,6 +18,7 @@ import Canvas2D from './Canvas2D.jsx';
 import Panels from './Panels.jsx';
 import Rail from './Rail.jsx';
 import View3D from './View3D.jsx';
+import SideView from './SideView.jsx';
 import Model3DDialog from './Model3DDialog.jsx';
 import TemplatesView from './TemplatesView.jsx';
 import { Seg, Dialog, Menu, memory } from './widgets.jsx';
@@ -208,7 +209,8 @@ export default function App() {
         <Panels design={design} g={g} sel={sel} setSel={setSel} change={change} solid={stale ? null : slow.solid}
           onStarter={() => setDialog('starter')} onAddGhost={addGhost} onTraceGhost={traceGhost} onImportFretboard={importFretboard} />
         <main className="stage">
-          {tab === 'design' && <Canvas2D design={design} g={g} sel={sel} setSel={setSel} edit={edit} begin={begin} commit={commit} show={show} findings={stale ? [] : slow.findings} viewCmd={viewCmd} ghosts={ghosts} />}
+          {tab === 'design' && sel && sel.kind === 'side' && g.neck && g.neck.head && g.neck.head.side && <SideView design={design} g={g} setSel={setSel} edit={edit} begin={begin} commit={commit} />}
+          {tab === 'design' && !(sel && sel.kind === 'side' && g.neck && g.neck.head && g.neck.head.side) && <Canvas2D design={design} g={g} sel={sel} setSel={setSel} edit={edit} begin={begin} commit={commit} show={show} findings={stale ? [] : slow.findings} viewCmd={viewCmd} ghosts={ghosts} />}
           {tab === 'view3d' && slow.solid && <View3D design={slow.of || design} g={slow.g3} solid={slow.solid} onSaveModel={() => setDialog('model3d')} />}
           {tab === 'templates' && <TemplatesView design={design} toast={toast} />}
           {toastMsg && <div className="toast" role="status" aria-live="polite">{toastMsg}</div>}

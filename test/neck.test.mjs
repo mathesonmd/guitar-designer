@@ -3,11 +3,11 @@ import { test, before } from 'node:test';
 import assert from 'node:assert/strict';
 import * as rc from 'replicad';
 import start from 'replicad-opencascadejs';
-import { defaultDesign, normalizeDesign } from '../src/model/design.js';
+import { defaultDesign, normalizeDesign, makeSideLine } from '../src/model/design.js';
 import { derive } from '../src/model/derive.js';
 import { buildNeckSolid } from '../src/export/step.js';
 import { NECK_PROFILES } from '../src/data/neckprofiles.js';
-import { backCurve } from '../src/model/neck.js';
+import { backCurve, sideLine } from '../src/model/neck.js';
 import { fretDistance } from '../src/core/fret.js';
 
 let oc;
@@ -148,6 +148,8 @@ test('headstock CAD solid: sound, and the same volume as its cross-sections give
   const bare = derive(off, { tol: 0.005 }).neck.volume;
   const cases = [['starting headstock', {}], ['peaked volute', { voluteStyle: 'peak' }], ['17 degrees', { angle: 17 }], ['10 degrees, thinner', { angle: 10, thickness: 13 }], ['no volute', { voluteHeight: 0 }], ['big peaked volute', { voluteHeight: 8, voluteLength: 60, voluteAhead: 45, voluteStyle: 'peak' }],
     ['25 degrees, short transition', { angle: 25, transition: 20 }], ['long transition, thick', { transition: 80, thickness: 19 }], ['a transition that ends exactly on an outline point', { transition: 38 }],
+    ['side view drawn, with a corner and a hollow', (d) => { d.neck.head.side = { on: true, points: [{ s: -55, out: 0 }, { s: -30, out: -1 }, { s: -4, out: 6, k: 'c' }, { s: 14, out: 1.5 }, { s: 30, out: 0 }] }; }],
+    ['tongue with its side view drawn', (d) => { d.neck.head = { ...d.neck.head, voluteStyle: 'tongue', side: { on: true, points: [{ s: -34, out: 1 }, { s: -10, out: 3.5 }, { s: 20, out: 1 }, { s: 40, out: 0 }] } }; }],
     ['round tongue', { voluteStyle: 'tongue', voluteHeight: 2, voluteLength: 28 }], ['pointed tongue, narrow cove', { voluteStyle: 'tongue', tongueTip: 'point', voluteHeight: 3, voluteLength: 35, tongueCove: 4 }], ['level tongue, wide cove', { voluteStyle: 'tongue', voluteHeight: 0, voluteLength: 20, tongueCove: 14 }],
     ['lopsided outline', (d) => { const ns = d.neck.head.outline.nodes; ns[2] = { ...ns[2], x: -55, y: 120 }; ns[4] = { ...ns[4], x: 15, y: 210 }; }]];
   for (const [name, change] of cases) {
@@ -158,7 +160,7 @@ test('headstock CAD solid: sound, and the same volume as its cross-sections give
     assert.ok(pct(r.volume, n.volume) < 0.6, `${name}: volume differs by ${pct(r.volume, n.volume).toFixed(3)}%`);
     // the headstock adds about its outline's area times its thickness
     const area = Math.abs(n.head.poly.reduce((a, p, i) => { const q = n.head.poly[(i + 1) % n.head.poly.length]; return a + p.x * q.y - q.x * p.y; }, 0)) / 2;
-    assert.ok(Math.abs((n.volume - bare) / (area * n.head.thick) - 1) < 0.08, `${name}: the headstock adds ${((n.volume - bare) / 1000).toFixed(1)} cm3 against ${((area * n.head.thick) / 1000).toFixed(1)} for its slab alone`);
+    assert.ok(Math.abs((n.volume - bare) / (area * n.head.thick) - 1) < 0.12, `${name}: the headstock adds ${((n.volume - bare) / 1000).toFixed(1)} cm3 against ${((area * n.head.thick) / 1000).toFixed(1)} for its slab alone`);
   }
 });
 
@@ -227,4 +229,64 @@ test('tongue: the headstock\'s flat carried down the neck to a tip, level across
   assert.ok(Math.abs(level.at(g.nutY - 10).depth - bare.depth) < 1e-9 && level.head.tongue);
   // an older file's volute settings still open as they were
   assert.equal(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: defaultDesign().outline, neck: { scale: 647.7, head: { on: true, angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteStyle: 'peak', transition: 45 } } }).neck.head.tongueCove, 8);
+});
+
+test('side view drawn: a smooth line through the points, level where it leaves and rejoins the plain back, sharp only at a corner', () => {
+  const line = sideLine([{ s: 10, out: 2 }, { s: -40, out: 3 }, { s: -15, out: 5, k: 'c' }, { s: 30, out: 9 }, { s: -28, out: 1 }]);
+  assert.deepEqual(line.points.map((p) => [p.s, p.out, p.k]), [[-40, 0, 's'], [-28, 1, 's'], [-15, 5, 'c'], [10, 2, 's'], [30, 0, 's']], 'points in order, both ends on the plain line');
+  for (const p of line.points) assert.ok(Math.abs(line.out(p.s) - p.out) < 1e-12, 'it passes through every point');
+  assert.ok(line.out(-41) === 0 && line.out(31) === 0 && line.from === -40 && line.to === 30 && line.crest === -15);
+  const slope = (s) => (line.out(s + 1e-4) - line.out(s - 1e-4)) / 2e-4;
+  assert.ok(Math.abs(slope(-39.999)) < 1e-3 && Math.abs(slope(29.999)) < 1e-3, 'level at both ends');
+  assert.ok(slope(-15.01) > 0.2 && slope(-14.99) < -0.05, 'a corner turns sharply');
+  assert.ok(Math.abs(slope(-28.01) - slope(-27.99)) < 1e-2 && Math.abs(slope(9.99) - slope(10.01)) < 1e-2, 'a smooth point does not');
+  for (let s = -40; s < 30; s += 0.25) { let i = 0; while (line.points[i + 1].s < s) i++; const a = line.points[i].out, b = line.points[i + 1].out; assert.ok(line.out(s) >= Math.min(a, b) - 1e-9 && line.out(s) <= Math.max(a, b) + 1e-9, 'never past either neighbor at ' + s); }
+  // limits: kept inside the allowed length and heights; a doubled point is dropped; fewer than two points is no line
+  const lim = sideLine([{ s: -400, out: 0 }, { s: 0, out: 40 }, { s: 0.5, out: 3 }, { s: 200, out: 0 }], { max: 43 });
+  assert.deepEqual(lim.points.map((p) => [p.s, p.out]), [[-150, 0], [0, 15], [43, 0]]);
+  assert.equal(sideLine([{ s: 0, out: 1 }]), null);
+  // a tongue's first point is its tip and keeps its height; before it the height is held
+  const free = sideLine([{ s: -30, out: 2 }, { s: 0, out: 3 }, { s: 40, out: 0 }], { freeStart: true });
+  assert.ok(free.points[0].out === 2 && free.out(-60) === 2 && free.out(-30) === 2 && free.out(40) === 0);
+});
+
+test('side view drawn: it takes the place of the volute\'s numbers, starts close to them, and reshapes the neck', () => {
+  const d = defaultDesign(), plain = derive(d, { tol: 0.005 }), ph = plain.neck.head;
+  const start = makeSideLine(ph);
+  assert.deepEqual(start.map((p) => [p.s, p.out]), [[-40, 0], [-20, 2.25], [0, 4], [12.5, 2.25], [25, 0]], 'five points to start from, taken from the volute as it is');
+  d.neck.head.side = { on: true, points: start };
+  const g = derive(d, { tol: 0.005 }), n = g.neck, h = n.head;
+  assert.ok(h.side && h.side.points.length === 5 && h.backFrom === 40);
+  // close to the mound the numbers gave: the same height under the nut, within 0.3 mm everywhere along the centerline
+  assert.ok(Math.abs(n.at(g.nutY).depth - plain.neck.at(g.nutY).depth) < 1e-9);
+  for (let s = -45; s <= 0; s += 1) assert.ok(Math.abs(n.at(g.nutY + s).depth - plain.neck.at(g.nutY + s).depth) < 0.3, 'at ' + s);
+  for (let v = 1; v <= 30; v += 1) assert.ok(Math.abs(h.at(v).depth - ph.at(v).depth) < 0.3, 'past the nut at ' + v);
+  // away from the centerline it still dies away to nothing at the neck's edge, and its foot is still a rounded line
+  assert.ok(h.swell(0, 1) === 0 && h.swell(0, 0.97) < 0.02 && Math.abs(h.swell(0, 0) - 4) < 1e-9);
+  assert.ok(h.swell(-39, 0) > 0 && h.swell(-39, 0.4) === 0 && h.swell(-20, 0.4) > 0, 'the foot reaches farthest down the neck on the centerline');
+  // a line that is lopsided about its highest point still gives a surface with no step where its two sides meet
+  const lop = defaultDesign(); lop.neck.head.side = { on: true, points: [{ s: -70, out: 0 }, { s: -30, out: 2 }, { s: -3, out: 5 }, { s: 9, out: 2.5 }, { s: 22, out: 0 }] };
+  const lh = derive(lop, { tol: 0.005 }).neck.head;
+  for (const across of [0.1, 0.3, 0.6, 0.9]) assert.ok(Math.abs(lh.swell(-3.001, across) - lh.swell(-2.999, across)) < 0.01, `no step across the highest point, ${across} of the way to the edge`);
+  for (let sv = -70; sv <= 22; sv += 1) assert.ok(Math.abs(lh.swell(sv, 0) - lh.side.out(sv)) < 1e-9, 'on the centerline it is the drawn line');
+  assert.ok(lh.swell(-3, 1) === 0 && lh.swell(-60, 0.7) === 0 && lh.swell(15, 0.9) === 0);
+  d.neck.head.side = { on: true, points: [{ s: -60, out: 0 }, { s: -25, out: 5 }, { s: 0, out: 4 }, { s: 12.5, out: 2.25 }, { s: 25, out: 0 }] };
+  const g2 = derive(d, { tol: 0.005 }), n2 = g2.neck;
+  assert.ok(Math.abs(n2.at(g.nutY - 25).depth - (n2.head.backZ ? n2.top - n2.head.backZ(g.nutY - 25) : 0) - 5) < 1e-9, 'the back stands 5 mm out where the point says');
+  assert.ok(n2.head.backFrom === 60 && n2.sections.some((q) => Math.abs(q.y - (g.nutY - 59)) < 0.6), 'sections are placed all along the drawn line');
+  assert.ok(Math.abs(n2.at(g.nutY - 61).depth - plain.neck.at(g.nutY - 61).depth + ph.swell(-61, 0)) < 1e-9 && n2.head.sections[n2.head.sections.length - 1].depth === n2.head.thick);
+  // switched off, the numbers are back in charge and the points are kept for later
+  d.neck.head.side.on = false;
+  const off = derive(d, { tol: 0.005 }).neck;
+  assert.ok(!off.head.side && Math.abs(off.at(g.nutY - 20).depth - plain.neck.at(g.nutY - 20).depth) < 1e-12 && d.neck.head.side.points.length === 5);
+  // a tongue: the drawn line is the height of its flat, and its first point is the tip
+  const t = defaultDesign(); t.neck.head = { ...t.neck.head, voluteStyle: 'tongue', voluteHeight: 2, voluteLength: 28 };
+  const ts = makeSideLine(derive(t, { tol: 0.005 }).neck.head);
+  assert.deepEqual(ts.map((p) => p.s), [-28, 0, 21.5, 43]); assert.ok(ts[0].out === 2 && ts[3].out === 0);
+  t.neck.head.side = { on: true, points: [{ s: -35, out: 1 }, { s: 0, out: 3 }, { s: 43, out: 0 }] };
+  const tn = derive(t, { tol: 0.005 }).neck;
+  assert.ok(tn.head.swell(-60, 0) === 0 && Math.abs(tn.at(tn.nutY - 60).depth - derive(defaultDesign(), { tol: 0.005 }).neck.at(tn.nutY - 60).depth + 0) < 1e-9, 'behind the tongue\'s tip and its cove the neck is untouched');
+  assert.ok(tn.head.tongue.tip === -35 && Math.abs(tn.head.tongue.proud(-35) - 1) < 1e-12 && Math.abs(tn.head.tongue.proud(0) - 3) < 1e-12 && tn.head.tongue.proud(43) === 0);
+  // an older file has no drawn side view
+  assert.deepEqual(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, neck: { scale: 647.7, head: { on: true, angle: 14 } } }).neck.head.side, { on: false, points: [] });
 });

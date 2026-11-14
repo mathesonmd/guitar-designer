@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 78 geometry and export tests (35 of them build the CAD solid)
+    npm test                  # 80 geometry and export tests (37 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 34 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -117,8 +117,11 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 - After the third version he said "getting closer on the volute" and sent photos of tongue and dart
   volutes: a flat with a crisp U or pointed edge standing on the back of the neck, a cove outside it.
   That is the "Tongue" volute shape (`head.tongue`). He would model this in CAD by drawing several guide
-  lines and lofting between them, and suggested being able to draw the side profile: not built yet, and
-  the natural next step (the side view of the back, and the tongue's outline, as drawn lines).
+  lines and lofting between them, and asked for the side view next: built (`head.side`, the side view
+  editor). The tongue's outline as a drawn line is the other guide line, not built.
+- Number boxes (`Len`, `Num` in `widgets.jsx`) write nothing unless typed in. Before that, a box that
+  still held focus could re-apply its old text after another control changed its value (a thickness
+  typed, then a profile picked): it showed up as a click-through step failing one run in three.
 - The Smooth / Corner / Delete bar must never cover the point being adjusted (his complaint): it sits
   about 100 px below a point in the upper half of the drawing and above one in the lower half.
 - Look at the neck before sending him any change: the "Back of headstock" view in the app, and a shaded
@@ -155,10 +158,11 @@ mesh), with rolled or square edges and with or without the pockets; on/off switc
 roundover; a binding channel; hole depths entered per hardware; the neck as a 3D model: shaft and heel
 (thickness from Warmoth's published profiles, a flat top for the fretboard, a heel that fills the pocket)
 and an angled headstock, its outline drawn in the app, its back one surface with the neck's, with a smooth or
-peaked volute on the crown of the back, or a tongue (a flat with a crisp edge and a cove).
+peaked volute on the crown of the back, or a tongue (a flat with a crisp edge and a cove); the side view of the back can be drawn
+in place of the volute's numbers.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
-carved tops, drawing the side view of the neck's back and the tongue's outline, a flat (unangled) headstock, tuner holes, the nut slot, the neck's truss rod channel and
+carved tops, drawing the tongue's outline, a flat (unangled) headstock, tuner holes, the nut slot, the neck's truss rod channel and
 heel screw holes, a sculpted
 heel on the body, STEP roundovers larger than the outline's
 tightest outside curve, the purfling channel in the STEP and STL (it is in the 3D picture and the CNC
@@ -181,8 +185,8 @@ touch gestures, Safari and Firefox are untried.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
 - Whether the demo copies of the app work for him (the artifact, and `dist/index.html` opened from disk).
-- The headstock: whether the tongue matches his photos, and whether to build drawn guide lines (side view
-  and tongue outline) next; whether "peak" means a point on the crown, as built; and his numbers for
+- The headstock: whether the tongue matches his photos, whether the drawn side view gives him the control
+  he wants, and whether to build the tongue's outline as a drawn line next; whether "peak" means a point on the crown, as built; and his numbers for
   angle, thickness, transition, volute and tongue.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.

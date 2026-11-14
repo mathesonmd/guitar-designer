@@ -650,7 +650,9 @@ await step('a bevel around the top edge: drag a diamond for width, give a point 
   await page.keyboard.press('Escape');
   await tab('Design'); await openSec('body');
   await page.locator('section[data-sec="body"] button:has-text("Set every point to the general sizes")').click();
-  const s2 = await state();
+  // (the save to the browser's storage can lag behind a heavy 3D save, so wait for it instead of a fixed pause)
+  let s2 = await state();
+  for (let i = 0; i < 8 && !s2.outline.nodes.every((q) => q.bw === undefined && q.bd === undefined); i++) s2 = await state();
   assert(s2.outline.nodes.every((q) => q.bw === undefined && q.bd === undefined), 'every point is back to the general sizes');
   await setField('#eb-roll', '0');
   await page.locator('section[data-sec="body"] label.check:has-text("Purfling channel along the inner line") input').uncheck();
@@ -671,9 +673,13 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   await page.selectOption('#nb-profile', 'standardThin');
   await setField('#nb-full', '2.4');
   const b2 = (await state()).neck.back;
-  assert(Math.abs(b2.t1 - 20.32) < 1e-6 && Math.abs(b2.fullness - 2.4) < 1e-6, 'profile restored, fullness stored');
+  assert(Math.abs(b2.t1 - 20.32) < 1e-6 && Math.abs(b2.fullness - 2.4) < 1e-6, `profile restored, fullness stored (1st fret ${b2.t1}, fullness ${b2.fullness}, profile ${b2.profile})`);
+  // a number box that is clicked into and left without typing writes nothing (it once re-applied its old text after a profile was picked)
+  await setField('#nb-t1', '21 mm'); await page.locator('#nb-t1').click(); await page.selectOption('#nb-profile', 'standardThin'); await page.locator('#nb-full').click(); await page.keyboard.press('Escape');
+  const b3 = (await state()).neck.back;
+  assert(Math.abs(b3.t1 - 20.32) < 1e-9 && b3.profile === 'standardThin', `a box left without typing changes nothing (1st fret ${b3.t1})`);
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: drawing the side view of the back and the tongue’s outline, a flat \(unangled\) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: drawing the tongue’s outline, a flat \(unangled\) headstock, tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
   // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
   const h0 = (await state()).neck.head;
   assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
@@ -696,6 +702,35 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   assert(pinned[0].x === before[0].x && pinned[0].y === before[0].y, 'the end at the corner of the nut does not move');
   assert((await state()).outline.nodes.length === n0len, 'the body outline was not touched');
   await page.keyboard.press('Escape');
+  // the side view of the back, drawn: points to drag in place of the volute's numbers
+  await page.locator('section[data-sec="neck"] button:has-text("Draw the side view of the back")').click(); await settle(500);
+  const sp = page.locator('.stage [data-k="sidept"]');
+  assert(await page.locator('.stage [data-k="sideview"]').count() === 1 && await sp.count() === 5, 'the side view opens with five points');
+  const side0 = (await state()).neck.head.side;
+  assert(side0.on && side0.points.length === 5 && side0.points[2].s === 0 && side0.points[2].out === 4, 'it starts from the volute as the numbers had it');
+  assert(await page.locator('#hs-vh').count() === 0 && /The side view of the back is drawn/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says the line is in charge and hides the numbers it replaces');
+  const grab = async (i, dx, dy) => { const b = await sp.nth(i).boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await page.mouse.move(b.x + b.width / 2 + dx, b.y + b.height / 2 + dy, { steps: 6 }); await page.mouse.up(); await settle(300); };
+  await grab(2, 0, 30); // the point under the nut, pulled away from the fretboard: more wood
+  const side1 = (await state()).neck.head.side;
+  assert(side1.points[2].out > 5 && Math.abs(side1.points[2].s) < 0.5, `the point under the nut now stands ${side1.points[2].out} mm out`);
+  await grab(0, -40, 40); // an end point slides along the plain line and stays on it
+  const side2 = (await state()).neck.head.side;
+  assert(side2.points[0].s < -42 && side2.points[0].out === 0, 'an end point slides along the plain line and stays on it');
+  await sp.nth(2).click(); await settle(300);
+  const sbar = await page.locator('.stage [data-k="pointbar"]').boundingBox(), sdot = await sp.nth(2).boundingBox();
+  const scx = sdot.x + sdot.width / 2, scy = sdot.y + sdot.height / 2;
+  assert(Math.hypot(Math.max(sbar.x - scx, scx - (sbar.x + sbar.width), 0), Math.max(sbar.y - scy, scy - (sbar.y + sbar.height), 0)) > 60, 'the point bar stays clear of the point here too');
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Corner")').click();
+  assert((await state()).neck.head.side.points[2].k === 'c', 'a point can be made a corner, for a peak');
+  const lineBox = await page.locator('.stage [data-k="sideline"]').boundingBox(), pa = await sp.nth(1).boundingBox(), pb = await sp.nth(2).boundingBox();
+  await page.mouse.dblclick((pa.x + pb.x) / 2 + pa.width / 2, (pa.y + pb.y) / 2 + pa.height / 2); await settle(300);
+  assert(lineBox && (await state()).neck.head.side.points.length === 6, 'a double-click adds a point');
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Delete point")').click(); await settle(300);
+  assert((await state()).neck.head.side.points.length === 5, 'and it can be deleted again');
+  await page.locator('.stage button:has-text("Done: back to the drawing")').click(); await settle(300);
+  assert(await page.locator('.stage [data-k="sideview"]').count() === 0, 'Done returns to the drawing');
+  await page.locator('section[data-sec="neck"] button:has-text("Back to the numbers")').click();
+  assert((await state()).neck.head.side.on === false && await page.locator('#hs-vh').count() === 1, 'Back to the numbers switches the drawn line off and brings the numbers back');
   // a tongue: the flat of the headstock's back carried down the neck
   await page.locator('section[data-sec="neck"] button:has-text("Tongue")').click();
   await setField('#hs-cv', '10 mm'); await setField('#hs-vl', '30 mm');

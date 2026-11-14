@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 78 geometry and export tests (Node, no browser)
+    npm test               # 80 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -183,6 +183,20 @@ CAD solid; the 3D view draws the same cross-sections.
 - Past the nut the sections lean back smoothly, from upright at the nut to square with the headstock's
   face, over a length long enough that no two cross within 30 mm of the face. (A lean that started or
   stopped abruptly left a faint line across the flat of a tongue.)
+- The side view of the back can be drawn (`head.side`, `sideLine` in `neck.js`, `src/ui/SideView.jsx`).
+  Each point is a distance along from the nut and how far the back stands out there from its plain line
+  (the line it takes with no volute). The line through them is smooth, level where it leaves and rejoins
+  the plain line, never overshoots between two points, and turns sharply only at a point marked as a
+  corner. While it is drawn it replaces the volute's height, lengths and shape. Away from the centerline
+  the height falls off as the mound does; where the line is lopsided about its highest point the two
+  sides are blended by direction, so there is no crease between them. For a tongue the line is the height
+  of the tongue's flat and its first point is the tip. Points are stored relative to the plain line, so
+  changing the headstock angle or thickness keeps the drawn shape.
+- The sawn edge of the headstock grows in height steadily from nothing at the nut. (When the sections'
+  extra width grew in proportion to the distance from the nut, that edge jumped to about 3 mm tall within
+  the first millimeter and left a line across the back.)
+- The neck's cross-sections are worked out only when something asks for them (the 3D view, the save
+  dialog, the side view): deriving a design for the drawing takes about 4 ms without them and 70 with.
 - The CAD solid is built with no cutting or joining operations. The skin joins each cross-section to the
   next with straight lines; sections are 1 mm apart wherever the shape is changing (within about 0.01 mm
   of the true curve) and 10 mm apart on the plain shaft. The heel block and the flat of the headstock are
@@ -195,8 +209,7 @@ CAD solid; the 3D view draws the same cross-sections.
 - The neck's volume is the shaft by its cross-sections, the transition as the closed shape its sections
   make when joined by straight lines, and the flat part's area times its thickness. The CAD solid must
   match it within 1.5% or it is not saved; in a sweep of 48 randomized headstocks all were within 0.2%.
-- Not built: drawing the side view of the back and the tongue's outline as guide lines (the owner's
-  suggestion), a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
+- Not built: drawing the tongue's outline, a flat (unangled) headstock, tuner holes, nut slot, truss rod channel, heel screw holes.
 
 ## Not built yet
 

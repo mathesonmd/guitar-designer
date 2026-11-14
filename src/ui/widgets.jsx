@@ -7,12 +7,15 @@ export function Len({ value, onChange, units, min = -1e6, max = 1e6, id, disable
   const [text, setTextState] = useState(null); // null = not editing
   const live = useRef(null);                   // the same text, readable at once (Enter commits, then blur fires)
   const setText = (t) => { live.current = t; setTextState(t); };
+  const typed = useRef(false);                 // a box that was only clicked into, not typed in, changes nothing when left
   const [bad, setBad] = useState(false);
   const shown = text !== null ? text : fmtLen(value, units);
   const commit = () => {
     const t = live.current;
     if (t === null) return;
     setText(null);
+    if (!typed.current) return;
+    typed.current = false;
     const v = parseLen(t, units);
     if (Number.isNaN(v)) { setBad(true); setTimeout(() => setBad(false), 700); return; }
     const c = Math.max(min, Math.min(max, v));
@@ -27,8 +30,8 @@ export function Len({ value, onChange, units, min = -1e6, max = 1e6, id, disable
   return (
     <span className="len" title={title || (frac && frac.includes('/') ? `${frac} in` : undefined)}>
       <input id={id} type="text" inputMode="decimal" className={bad ? 'bad' : ''} disabled={disabled} value={shown}
-        onFocus={(e) => { setText(fmtLen(value, units)); requestAnimationFrame(() => e.target.select()); }}
-        onChange={(e) => setText(e.target.value)} onBlur={commit}
+        onFocus={(e) => { typed.current = false; setText(fmtLen(value, units)); requestAnimationFrame(() => e.target.select()); }}
+        onChange={(e) => { typed.current = true; setText(e.target.value); }} onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { commit(); e.target.blur(); }
           else if (e.key === 'Escape') { setText(null); e.target.blur(); }
@@ -44,10 +47,13 @@ export function Num({ value, onChange, min = -1e9, max = 1e9, step = 1, id, suff
   const [text, setTextState] = useState(null);
   const live = useRef(null);
   const setText = (t) => { live.current = t; setTextState(t); };
+  const typed = useRef(false);                 // a box that was only clicked into, not typed in, changes nothing when left
   const commit = () => {
     const t = live.current;
     if (t === null) return;
     setText(null);
+    if (!typed.current) return;
+    typed.current = false;
     const v = parseFloat(t);
     if (!Number.isFinite(v)) return;
     const c = Math.max(min, Math.min(max, v));
@@ -56,8 +62,8 @@ export function Num({ value, onChange, min = -1e9, max = 1e9, step = 1, id, suff
   return (
     <span className="len num">
       <input id={id} type="text" inputMode="decimal" value={text !== null ? text : value.toFixed(digits)}
-        onFocus={(e) => { setText(value.toFixed(digits)); requestAnimationFrame(() => e.target.select()); }}
-        onChange={(e) => setText(e.target.value)} onBlur={commit}
+        onFocus={(e) => { typed.current = false; setText(value.toFixed(digits)); requestAnimationFrame(() => e.target.select()); }}
+        onChange={(e) => { typed.current = true; setText(e.target.value); }} onBlur={commit}
         onKeyDown={(e) => {
           if (e.key === 'Enter') { commit(); e.target.blur(); }
           else if (e.key === 'Escape') { setText(null); e.target.blur(); }
