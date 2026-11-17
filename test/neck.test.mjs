@@ -9,6 +9,7 @@ import { buildNeckSolid } from '../src/export/step.js';
 import { NECK_PROFILES } from '../src/data/neckprofiles.js';
 import { backCurve, sideLine, tongueOutline } from '../src/model/neck.js';
 import { fretDistance } from '../src/core/fret.js';
+import { dragHandle, setPointKind, autoHandles, stored } from '../src/ui/lineEdit.js';
 
 let oc;
 before(async () => { oc = await start(); rc.setOC(oc); });
@@ -348,4 +349,68 @@ test('flat headstock: level with the neck, its face stepped down, a scoop from t
   const a = derive(defaultDesign(), { tol: 0.005 }).neck.head;
   assert.ok(!a.level && a.drop === 0 && a.scoop === 0);
   assert.equal(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, neck: { scale: 647.7, head: { on: true, angle: 14 } } }).neck.head.kind, 'angled');
+});
+
+test('drawn lines have handles: a point\'s own handles set the direction and reach of the curve there', () => {
+  const base = [{ s: -40, out: 0 }, { s: -20, out: 2.25 }, { s: 0, out: 4 }, { s: 12.5, out: 2.25 }, { s: 25, out: 0 }];
+  const plain = sideLine(base);
+  // with no handles of its own a point gets handles a third of the way to each neighbor, along the smooth line
+  assert.ok(plain.used[0].hi === null && plain.used[4].ho === null && Math.abs(plain.used[2].ho[0] - 12.5 / 3) < 1e-12 && Math.abs(plain.used[2].hi[0] + 20 / 3) < 1e-12 && plain.used[2].ho[1] === 0 && plain.points[2].ho === null);
+  // a point's own handles: the curve leaves the point along them
+  const own = sideLine(base.map((p, i) => (i === 2 ? { ...p, hi: [-6, -1.5], ho: [8, 2] } : p)));
+  for (const p of own.points) assert.ok(Math.abs(own.out(p.s) - p.out) < 1e-9, 'still through every point');
+  const slope = (f, s) => (f.out(s + 1e-5) - f.out(s - 1e-5)) / 2e-5;
+  assert.ok(Math.abs(slope(own, 0.001) - 2 / 8) < 0.01 && Math.abs(slope(own, -0.001) - 1.5 / 6) < 0.01, 'the slope at the point is the handle\'s');
+  assert.ok(own.out(4) > plain.out(4) + 0.3, 'and the curve bulges the way the handle was pulled');
+  assert.ok(Math.abs(own.out(-30) - plain.out(-30)) < 1e-9 && Math.abs(own.out(20) - plain.out(20)) < 1e-9, 'the pieces that do not touch that point are unchanged');
+  // a handle reaches no farther along than the next point, and two that would pass each other are shortened to meet; the line never doubles back
+  const far = sideLine(base.map((p, i) => (i === 2 ? { ...p, ho: [40, 3] } : i === 3 ? { ...p, hi: [-30, 1] } : p)));
+  assert.ok(far.used[2].ho[0] <= 12.5 + 1e-9 && far.used[3].hi[0] >= -12.5 - 1e-9 && far.used[2].ho[0] - far.used[3].hi[0] <= 12.5 + 1e-9);
+  for (let s = 0; s < 12.5; s += 0.1) assert.ok(Number.isFinite(far.out(s)));
+  assert.ok(Math.abs(far.out(0) - 4) < 1e-9 && Math.abs(far.out(12.5) - 2.25) < 1e-9);
+  // a handle that is not two numbers is ignored
+  assert.deepEqual(sideLine(base.map((p, i) => (i === 2 ? { ...p, ho: ['x', 1], hi: [1] } : p))).used, plain.used);
+  // dragging a handle on a smooth point turns the opposite one to stay in line and keeps its length; on a corner it does not
+  const dragged = dragHandle(plain.points, plain.used, 2, 'ho', [6, 3]);
+  assert.deepEqual(dragged[2].ho, [6, 3]);
+  assert.ok(Math.abs(dragged[2].hi[0] * 3 - dragged[2].hi[1] * 6) < 0.05 && dragged[2].hi[0] < 0 && dragged[2].hi[1] < 0 && Math.abs(Math.hypot(...dragged[2].hi) - 20 / 3) < 0.02, 'in line with it, pointing the other way, as long as before');
+  const corner = dragHandle(plain.points.map((p, i) => (i === 2 ? { ...p, k: 'c' } : p)), plain.used, 2, 'ho', [6, 3]);
+  assert.ok(corner[2].ho[1] === 3 && Math.abs(corner[2].hi[1]) < 1e-9 && Math.abs(corner[2].hi[0] + 6.67) < 0.01);
+  assert.deepEqual(dragHandle(plain.points, plain.used, 2, 'ho', [-5, 2])[2].ho, [0, 2], 'a forward handle cannot be dragged behind its point');
+  // made smooth again, the two handles are brought back into line; automatic handles drops them
+  const back = setPointKind(corner, sideLine(corner).used, 2, 's');
+  assert.ok(back[2].k === 's' && Math.abs(back[2].hi[0] * back[2].ho[1] - back[2].hi[1] * back[2].ho[0]) < 0.05);
+  assert.ok(autoHandles(dragged, 2)[2].hi === null && autoHandles(dragged, 2)[2].ho === null && autoHandles(dragged, 2)[1] !== undefined);
+  // stored with the design: handles only where a point has its own
+  assert.deepEqual(stored(plain.points[1], 'out'), { s: -20, out: 2.25, k: 's' });
+  assert.deepEqual(stored(dragged[2], 'out'), { s: 0, out: 4, k: 's', hi: dragged[2].hi, ho: [6, 3] });
+  // the tongue's outline: the round tip's handle points straight across the neck; pulled along the neck it makes the tip pointed
+  const t = tongueOutline([{ s: -30, w: 0 }, { s: -14, w: 12 }, { s: 0, w: 16 }]);
+  assert.ok(t.used[0].ho[0] === 0 && Math.abs(t.used[0].ho[1] - 0.55 * 12) < 1e-9 && t.round);
+  const tp = tongueOutline([{ s: -30, w: 0, ho: [6, 2] }, { s: -14, w: 12 }, { s: 0, w: 16 }]);
+  assert.ok(tp.round === false && tp.half(-29.9) < 0.1 && Math.abs(tp.half(-14) - 12) < 1e-9);
+  // and it reshapes the neck
+  const d = defaultDesign(); d.neck.head.side = { on: true, points: own.points.map((p) => stored(p, 'out')) };
+  const h = derive(d, { tol: 0.005 }).neck.head;
+  assert.ok(Math.abs(h.swell(4, 0) - own.out(4)) < 1e-9 && h.side.points[2].ho[0] === 8);
+});
+
+test('tuner holes: rows on straight lines, placed on either kind of headstock, with the wood left outside each', () => {
+  const d = defaultDesign();
+  assert.deepEqual(derive(d, { tol: 0.005 }).neck.head.tuners, [], 'none until a layout is chosen');
+  d.neck.head.tuners = { ...d.neck.head.tuners, layout: '3+3' };
+  const g = derive(d, { tol: 0.005 }), h = g.neck.head, t = h.tuners;
+  assert.deepEqual(t.map((q) => [q.side, q.n, q.x, q.v, q.d]), [['bass', 1, -24, 38, 10], ['bass', 2, -27, 78, 10], ['bass', 3, -30, 118, 10], ['treble', 1, 24, 38, 10], ['treble', 2, 27, 78, 10], ['treble', 3, 30, 118, 10]]);
+  for (const q of t) assert.ok(Math.abs(q.gap - (h.widths(q.v)[q.side === 'bass' ? 'l' : 'r'] - Math.abs(q.x) - 5)) < 1e-9 && q.gap > 0, 'the wood between the hole and the edge beside it');
+  // where a hole is in space: on the tilted face of an angled headstock, on the level face of a flat one
+  const a = h.spot(24, 78, 0), mid = h.spot(24, 78, h.thick / 2);
+  assert.ok(Math.abs(a.z - h.faceZ(a.y)) < 1e-9 && Math.abs(a.y - (g.nutY + 78 * h.cos)) < 1e-9 && Math.abs(Math.hypot(mid.y - a.y, mid.z - a.z) - h.thick / 2) < 1e-9);
+  d.neck.head.kind = 'flat';
+  const f = derive(d, { tol: 0.005 }).neck.head, b = f.spot(24, 78, 0);
+  assert.ok(f.tuners.length === 6 && Math.abs(b.y - (g.nutY + 78)) < 1e-9 && Math.abs(b.z - (g.neck.top - 5)) < 1e-9 && f.spot(24, 78, 7.5).z === b.z - 7.5);
+  // numbers out of range or missing fall back sensibly; an older file has no tuner holes
+  d.neck.head.tuners = { layout: '6', side: 'treble', hole: 'x', first: 32, pitch: 25, inFirst: 8, inLast: 26 };
+  const six = derive(d, { tol: 0.005 }).neck.head.tuners;
+  assert.ok(six.length === 6 && six[0].d === 10 && six.every((q) => q.side === 'treble'));
+  assert.equal(normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, neck: { scale: 647.7, head: { on: true, angle: 14 } } }).neck.head.tuners.layout, 'none');
 });

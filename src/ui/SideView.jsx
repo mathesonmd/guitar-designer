@@ -1,6 +1,7 @@
 import React, { useRef, useState, useEffect } from 'react';
 import { useSize } from './widgets.jsx';
 import { fmtWithUnit } from '../core/units.js';
+import { dragHandle, setPointKind, autoHandles, stored } from './lineEdit.js';
 
 // The side view of the back of the neck around the nut, as a line to draw. The neck is seen from its bass
 // side: the heel is to the left, the headstock to the right, the fretboard face on top. Each point says
@@ -50,7 +51,7 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
   const spot = (p) => { if (p.s <= 0) return [p.s, -neck.at(nutY + p.s).depth]; const c = hd.at(p.s).p3[25]; return [c[1] - nutY, c[2] - top]; };
   const fixedOut = (i) => i === last || (i === 0 && !free);
 
-  const store = (list) => edit((d) => ({ ...d, neck: { ...d.neck, head: { ...d.neck.head, side: { on: true, points: list.map((p) => ({ s: Math.round(p.s * 100) / 100, out: Math.round(p.out * 100) / 100, k: p.k })) } } } }));
+  const store = (list) => edit((d) => ({ ...d, neck: { ...d.neck, head: { ...d.neck.head, side: { on: true, points: list.map((p) => stored(p, 'out')) } } } }));
   const world = (e) => { const r = svg.current.getBoundingClientRect(); return { s: s0 + (e.clientX - r.left - ox) / k, z: zHigh - (e.clientY - r.top - oy) / kz }; };
   const down = (i) => (e) => {
     e.stopPropagation(); e.preventDefault();
@@ -58,9 +59,17 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
     setPick(i); begin();
     drag.current = { i, at: world(e), p: { ...pts[i] }, moved: false };
   };
+  const downHandle = (i, which) => (e) => {
+    e.stopPropagation(); e.preventDefault();
+    svg.current.setPointerCapture(e.pointerId);
+    begin();
+    drag.current = { i, which, at: world(e), h: side.used[i][which].slice() };
+  };
   const move = (e) => {
     const dr = drag.current; if (!dr) return;
-    const w = world(e), i = dr.i, list = pts.map((p) => ({ ...p }));
+    const w = world(e), i = dr.i;
+    if (dr.which) { store(dragHandle(pts, side.used, i, dr.which, [dr.h[0] + (w.s - dr.at.s), dr.h[1] - (w.z - dr.at.z)])); return; } // (down the screen is farther out)
+    const list = pts.map((p) => ({ ...p }));
     const lo = i === 0 ? -150 : pts[i - 1].s + 2, hi = i === last ? hd.reach - 2 : Math.min(pts[i + 1].s - 2, i === 0 && free ? -2 : Infinity);
     list[i].s = Math.max(lo, Math.min(hi, dr.p.s + (w.s - dr.at.s)));
     if (!fixedOut(i)) list[i].out = Math.max(-6, Math.min(15, dr.p.out - (w.z - dr.at.z)));
@@ -75,7 +84,10 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
     begin(); store(list); commit(); setPick(list.findIndex((p) => p.s === w.s));
   };
   function remove(i) { if (i <= 0 || i >= last) return; begin(); store(pts.filter((p, j) => j !== i)); commit(); setPick(null); }
-  const setKind = (i, kind) => { begin(); store(pts.map((p, j) => (j === i ? { ...p, k: kind } : { ...p }))); commit(); };
+  const setKind = (i, kind) => { begin(); store(setPointKind(pts, side.used, i, kind)); commit(); };
+  const auto = (i) => { begin(); store(autoHandles(pts, i)); commit(); };
+  // where a handle of the selected point ends on the picture
+  const tipOf = (i, which) => { const c = spot(pts[i]), h = side.used[i][which]; return [c[0] + h[0], c[1] - h[1]]; };
 
   const sel = pick != null && pick <= last ? pts[pick] : null, at = sel && spot(sel), sx = at && X(at[0]), sy = at && Y(at[1]);
   return (
@@ -89,6 +101,13 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
         <text x={X(0)} y={Y(0) - 22} textAnchor="middle" fontSize="11" fill="var(--brass, #c8a45c)">Nut</text>
         <text x={X(s0) + 4} y={Y(0) - 8} fontSize="11" fill="var(--bone-dim, #9b9388)">Toward the heel</text>
         <text x={X(s1) - 4} y={Y(hd.faceZ(nutY + s1) - top) - 8} textAnchor="end" fontSize="11" fill="var(--bone-dim, #9b9388)">Headstock</text>
+        {pick != null && pick <= last && ['hi', 'ho'].filter((w) => side.used[pick][w]).map((w) => { const c = spot(pts[pick]), t = tipOf(pick, w); return (
+          <g key={w} data-k="sidehandle" data-w={w} onPointerDown={downHandle(pick, w)} style={{ cursor: 'move' }}>
+            <line x1={X(c[0])} y1={Y(c[1])} x2={X(t[0])} y2={Y(t[1])} stroke="var(--brass, #c8a45c)" strokeWidth="1.2" />
+            <circle cx={X(t[0])} cy={Y(t[1])} r="12" fill="transparent" />
+            <circle cx={X(t[0])} cy={Y(t[1])} r="4" fill="var(--brass, #c8a45c)" />
+          </g>
+        ); })}
         {pts.map((p, i) => { const c = spot(p); return (
           <g key={i} data-k="sidept" data-i={i} onPointerDown={down(i)} style={{ cursor: fixedOut(i) ? 'ew-resize' : 'move' }}>
             <circle cx={X(c[0])} cy={Y(c[1])} r="13" fill="transparent" />
@@ -107,16 +126,17 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
       </div>
       {sel && !drag.current && (
         /* kept well clear of the point: below one in the upper half of the view, above one in the lower half */
-        <div className="float" data-k="pointbar" style={{ left: Math.max(8, Math.min(size.w - 330, sx - 150)), top: sy < size.h / 2 ? Math.min(size.h - 50, sy + 96) : Math.max(8, sy - 136) }}>
-          <span className="mono" style={{ fontSize: 11, padding: '0 4px' }}>{fmtWithUnit(Math.abs(sel.s), u)} {sel.s < 0 ? 'behind' : 'past'} the nut{fixedOut(pick) ? '' : `, ${sel.out < 0 ? 'in' : 'out'} ${fmtWithUnit(Math.abs(sel.out), u)}`}</span>
+        <div className="float" data-k="pointbar" style={{ left: Math.max(8, Math.min(size.w - 470, sx - 200)), top: sy < size.h / 2 ? Math.min(size.h - 50, sy + 96) : Math.max(8, sy - 136) }}>
+          <span className="mono" style={{ fontSize: 11, padding: '0 4px', whiteSpace: 'nowrap' }}>{fmtWithUnit(Math.abs(sel.s), u)} {sel.s < 0 ? 'behind' : 'past'} the nut{fixedOut(pick) ? '' : `, ${sel.out < 0 ? 'in' : 'out'} ${fmtWithUnit(Math.abs(sel.out), u)}`}</span>
           {!fixedOut(pick) && <div className="seg" role="group" aria-label="Point type">
             <button type="button" className={sel.k === 's' ? 'on' : ''} onClick={() => setKind(pick, 's')}>Smooth</button>
             <button type="button" className={sel.k === 'c' ? 'on' : ''} onClick={() => setKind(pick, 'c')}>Corner</button>
           </div>}
+          {(sel.hi || sel.ho) && <button type="button" className="btn small" onClick={() => auto(pick)}>Automatic handles</button>}
           {pick > 0 && pick < last && pts.length > 2 && <button type="button" className="btn small" onClick={() => remove(pick)}>Delete point</button>}
         </div>
       )}
-      <div className="hintline"><span>Drag a point · double-click the line to add one · {free ? 'the first point is the tongue’s tip' : 'the end points slide along the plain line'}</span><span>Dashed: no volute</span></div>
+      <div className="hintline"><span>Drag a point, or the handles of the selected point · double-click the line to add one</span><span>Dashed: no volute</span></div>
     </div>
   );
 }

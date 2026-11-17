@@ -129,71 +129,99 @@ function sampled(left, depth, n, right, shift, to3, limit, flat) {
   return { pts, p3: [to3(L.corner), ...all.map((q) => q.p3), to3(R.corner)], din: all.map((q) => q.din), dout: all.map((q) => q.dout) };
 }
 
-// The side view of the back, as drawn: a smooth line through points, each `s` millimeters along from
-// the nut (negative toward the heel) and standing `out` millimeters from the plain line of the back
-// there (the line the back takes with no volute). Returns out(s): nothing outside the points, level
-// where it leaves and rejoins the plain line, passing through every point, never overshooting between
-// two of them, and turning sharply only at a point marked as a corner (k: 'c').
+// A drawn line: a curve through points, each with a handle on either side that sets the direction and
+// reach of the curve there, as in a drawing program (cubic Bezier curves). `pts` are in order along the
+// neck, each { s, v, hi, ho }: its place along from the nut, its value there, and its handles as
+// [along, value] offsets from the point (`hi` reaching back toward the heel, `ho` forward). The line has
+// to give one value at each place along the neck, so a handle can reach no farther along than the next
+// point, and where two handles facing each other would pass, both are shortened until they meet.
+// Returns value(s) for any place between the first and last point, and the handles as they are used.
+function handleCurve(pts) {
+  const segs = [];
+  for (let i = 0; i < pts.length - 1; i++) {
+    const a = pts[i], b = pts[i + 1], h = b.s - a.s;
+    let o = [Math.max(0, Math.min(h, a.ho[0])), a.ho[1]], n = [Math.max(-h, Math.min(0, b.hi[0])), b.hi[1]];
+    if (a.ho[0] > h) o[1] *= h / a.ho[0];
+    if (b.hi[0] < -h) n[1] *= -h / b.hi[0];
+    const over = (o[0] - n[0]) / h;
+    if (over > 1) { o = [o[0] / over, o[1] / over]; n = [n[0] / over, n[1] / over]; }
+    const S = [a.s, a.s + o[0], b.s + n[0], b.s], V = [a.v, a.v + o[1], b.v + n[1], b.v];
+    const at = (c, t) => { const u = 1 - t; return u * u * u * c[0] + 3 * u * u * t * c[1] + 3 * u * t * t * c[2] + t * t * t * c[3]; };
+    segs.push({ S, V, at, o, n });
+  }
+  const value = (sv) => {
+    let i = 0; while (i < segs.length - 1 && sv > pts[i + 1].s) i++;
+    const g = segs[i];
+    let lo = 0, hi = 1; // the place along rises steadily from one end of the piece to the other, so halving finds it
+    for (let k = 0; k < 44; k++) { const t = (lo + hi) / 2; if (g.at(g.S, t) < sv) lo = t; else hi = t; }
+    return g.at(g.V, (lo + hi) / 2);
+  };
+  return { value, used: pts.map((p, i) => ({ hi: i ? segs[i - 1].n : null, ho: i < segs.length ? segs[i].o : null })) };
+}
+// a handle as stored with a point, if it has one: two finite numbers
+const ownHandle = (h) => (Array.isArray(h) && h.length === 2 && Number.isFinite(+h[0]) && Number.isFinite(+h[1]) ? [+h[0], Math.max(-60, Math.min(60, +h[1]))] : null);
+
+// The side view of the back, as drawn: a line through points, each `s` millimeters along from the nut
+// (negative toward the heel) and standing `out` millimeters from the plain line of the back there (the
+// line the back takes with no volute). A point may carry its own handles (`hi`, `ho`: see handleCurve);
+// a point without them gets handles that make the line smooth, level where it leaves and rejoins the
+// plain line, never overshooting between two points, and turning sharply only at a corner (k: 'c').
+// Returns out(s): nothing outside the points.
 // `freeStart` leaves the first point where it was drawn (a tongue's tip stands proud); otherwise both
 // ends sit on the plain line.
 export function sideLine(points, { freeStart = false, min = -150, max = 78 } = {}) {
-  const pts = (points || []).map((p) => ({ s: Math.max(min, Math.min(max, +p.s || 0)), out: Math.max(-6, Math.min(15, +p.out || 0)), k: p.k === 'c' ? 'c' : 's' })).sort((a, b) => a.s - b.s);
+  const pts = (points || []).map((p) => ({ s: Math.max(min, Math.min(max, +p.s || 0)), out: Math.max(-6, Math.min(15, +p.out || 0)), k: p.k === 'c' ? 'c' : 's', hi: ownHandle(p.hi), ho: ownHandle(p.ho) })).sort((a, b) => a.s - b.s);
   for (let i = pts.length - 1; i > 0; i--) if (pts[i].s - pts[i - 1].s < 1) pts.splice(i, 1); // two points on one spot
   if (pts.length < 2) return null;
   const last = pts.length - 1;
   pts[last].out = 0; if (!freeStart) pts[0].out = 0;
-  // the slope arriving at and leaving each point
+  // the slope arriving at and leaving each point, for a point with no handles of its own
   const sec = []; for (let i = 0; i < last; i++) sec.push((pts[i + 1].out - pts[i].out) / (pts[i + 1].s - pts[i].s));
-  const din = [], dout = [];
-  for (let i = 0; i <= last; i++) {
-    if (i === 0 || i === last) { din.push(0); dout.push(0); continue; }
-    if (pts[i].k === 'c') { din.push(sec[i - 1]); dout.push(sec[i]); continue; }
-    const a = sec[i - 1], b = sec[i], ha = pts[i].s - pts[i - 1].s, hb = pts[i + 1].s - pts[i].s;
-    const d = a * b <= 0 ? 0 : (3 * (ha + hb)) / ((2 * hb + ha) / a + (hb + 2 * ha) / b); // level over a crest, never past either neighbor
-    din.push(d); dout.push(d);
-  }
-  const out = (sv) => {
-    if (sv <= pts[0].s) return freeStart ? pts[0].out : 0;
-    if (sv >= pts[last].s) return 0;
-    let i = 0; while (sv > pts[i + 1].s) i++;
-    const h = pts[i + 1].s - pts[i].s, t = (sv - pts[i].s) / h, t2 = t * t, t3 = t2 * t;
-    return (2 * t3 - 3 * t2 + 1) * pts[i].out + (t3 - 2 * t2 + t) * h * dout[i] + (-2 * t3 + 3 * t2) * pts[i + 1].out + (t3 - t2) * h * din[i + 1];
-  };
+  const run = pts.map((p, i) => {
+    let din = 0, dout = 0;
+    if (i > 0 && i < last) {
+      if (p.k === 'c') { din = sec[i - 1]; dout = sec[i]; } else {
+        const a = sec[i - 1], b = sec[i], ha = p.s - pts[i - 1].s, hb = pts[i + 1].s - p.s;
+        din = dout = a * b <= 0 ? 0 : (3 * (ha + hb)) / ((2 * hb + ha) / a + (hb + 2 * ha) / b); // level over a crest, never past either neighbor
+      }
+    }
+    const back = i ? (p.s - pts[i - 1].s) / 3 : 0, fwd = i < last ? (pts[i + 1].s - p.s) / 3 : 0;
+    return { s: p.s, v: p.out, hi: p.hi || [-back, -din * back], ho: p.ho || [fwd, dout * fwd] };
+  });
+  const curve = handleCurve(run);
+  const out = (sv) => (sv <= pts[0].s ? (freeStart ? pts[0].out : 0) : sv >= pts[last].s ? 0 : curve.value(sv));
   let crest = 0; for (let i = 1; i <= last; i++) if (Math.abs(pts[i].out) > Math.abs(pts[crest].out)) crest = i;
-  return { points: pts, out, from: pts[0].s, to: pts[last].s, crest: pts[crest].s };
+  return { points: pts, used: curve.used, out, from: pts[0].s, to: pts[last].s, crest: pts[crest].s };
 }
 
 // The tongue's outline, as drawn: half its width at each place along from the nut, through points
-// { s, w, k }. The first point is the tip (no width there). A tip left smooth is round (the outline
-// leaves it square to the centerline, like the end of a U); a tip made a corner (k: 'c') is pointed.
-// Between the other points the line is smooth, never overshoots, and turns sharply only at a corner.
+// { s, w, k } that may carry their own handles (`hi`, `ho`: see handleCurve). The first point is the tip
+// (no width there). Without handles of its own, a tip left smooth is round (its handle points straight
+// across the neck, so the outline leaves it square to the centerline, like the end of a U) and a tip made
+// a corner (k: 'c') is pointed; between the other points the line is smooth, never overshoots, and turns
+// sharply only at a corner.
 export function tongueOutline(points, { min = -150, max = 78 } = {}) {
-  const pts = (points || []).map((p) => ({ s: Math.max(min, Math.min(max, +p.s || 0)), w: Math.max(0.5, Math.min(60, +p.w || 0)), k: p.k === 'c' ? 'c' : 's' })).sort((a, b) => a.s - b.s);
+  const pts = (points || []).map((p) => ({ s: Math.max(min, Math.min(max, +p.s || 0)), w: Math.max(0.5, Math.min(60, +p.w || 0)), k: p.k === 'c' ? 'c' : 's', hi: ownHandle(p.hi), ho: ownHandle(p.ho) })).sort((a, b) => a.s - b.s);
   for (let i = pts.length - 1; i > 0; i--) if (pts[i].s - pts[i - 1].s < 1) pts.splice(i, 1);
   if (pts.length < 2) return null;
   const last = pts.length - 1, round = pts[0].k !== 'c';
   pts[0].w = 0;
   const sec = []; for (let i = 0; i < last; i++) sec.push((pts[i + 1].w - pts[i].w) / (pts[i + 1].s - pts[i].s));
-  const din = [], dout = [];
-  for (let i = 0; i <= last; i++) {
-    if (i === 0) { din.push(sec[0]); dout.push(sec[0]); continue; }
-    if (i === last) { din.push(0); dout.push(0); continue; } // it arrives at its last point running straight along the neck
-    if (pts[i].k === 'c') { din.push(sec[i - 1]); dout.push(sec[i]); continue; }
-    const a = sec[i - 1], b = sec[i], ha = pts[i].s - pts[i - 1].s, hb = pts[i + 1].s - pts[i].s;
-    const d = a * b <= 0 ? 0 : (3 * (ha + hb)) / ((2 * hb + ha) / a + (hb + 2 * ha) / b);
-    din.push(d); dout.push(d);
-  }
-  const herm = (t, a, da, b, db) => { const t2 = t * t, t3 = t2 * t; return (2 * t3 - 3 * t2 + 1) * a + (t3 - 2 * t2 + t) * da + (-2 * t3 + 3 * t2) * b + (t3 - t2) * db; };
-  const half = (sv) => {
-    if (sv <= pts[0].s) return 0;
-    if (sv >= pts[last].s) return pts[last].w;
-    let i = 0; while (sv > pts[i + 1].s) i++;
-    const h = pts[i + 1].s - pts[i].s, t = (sv - pts[i].s) / h;
-    // a round tip: the same kind of curve, but in the square root of the distance from the tip, which makes the outline leave the tip square to the centerline
-    if (i === 0 && round) return Math.max(0, herm(Math.sqrt(t), 0, Math.SQRT2 * pts[1].w, pts[1].w, 2 * h * din[1]));
-    return Math.max(0, herm(t, pts[i].w, h * dout[i], pts[i + 1].w, h * din[i + 1]));
-  };
-  return { points: pts, half, from: pts[0].s, to: pts[last].s, round };
+  const run = pts.map((p, i) => {
+    const back = i ? (p.s - pts[i - 1].s) / 3 : 0, fwd = i < last ? (pts[i + 1].s - p.s) / 3 : 0;
+    if (i === 0) return { s: p.s, v: 0, hi: [0, 0], ho: p.ho || (round ? [0, 0.55 * pts[1].w] : [fwd, sec[0] * fwd]) };
+    let din = 0, dout = 0; // (it arrives at its last point running straight along the neck)
+    if (i < last) {
+      if (p.k === 'c') { din = sec[i - 1]; dout = sec[i]; } else {
+        const a = sec[i - 1], b = sec[i], ha = p.s - pts[i - 1].s, hb = pts[i + 1].s - p.s;
+        din = dout = a * b <= 0 ? 0 : (3 * (ha + hb)) / ((2 * hb + ha) / a + (hb + 2 * ha) / b);
+      }
+    }
+    return { s: p.s, v: p.w, hi: p.hi || [-back, -din * back], ho: p.ho || [fwd, dout * fwd] };
+  });
+  const curve = handleCurve(run);
+  const half = (sv) => (sv <= pts[0].s ? 0 : sv >= pts[last].s ? pts[last].w : Math.max(0, curve.value(sv)));
+  return { points: pts, used: curve.used, half, from: pts[0].s, to: pts[last].s, round: pts[0].ho ? Math.abs(pts[0].ho[0]) < 0.3 * Math.abs(pts[0].ho[1]) : round };
 }
 
 // Area of that cross-section (the back curve closed by the flat top).
@@ -404,7 +432,22 @@ export function buildNeck(design, g) {
     }
     // (an outline point lying exactly on that line would otherwise appear twice)
     for (let i = slab.length - 1; i >= 0; i--) { const a = slab[i], b = slab[(i + 1) % slab.length]; if (Math.hypot(a.x - b.x, a.y - b.y) < 1e-6) slab.splice(i, 1); }
-    head = { side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, line };
+    // Tuner holes: straight through the headstock, square to its face. Each row lies on a straight line
+    // from its first hole to its last. `gap` is the wood left between a hole and the headstock's edge
+    // beside it (negative when the hole breaks out of the outline).
+    const tuners = [], tn = h.tuners || {};
+    if (tn.layout === '3+3' || tn.layout === '6' || tn.layout === 6) {
+      const num = (v, lo, hi, d) => (Number.isFinite(+v) ? Math.max(lo, Math.min(hi, +v)) : d);
+      const d = num(tn.hole, 3, 16, 10), first = num(tn.first, 10, 300, 38), pitch = num(tn.pitch, 12, 80, 40), a = num(tn.inFirst, 0, 90, 24), b = num(tn.inLast, 0, 90, 30);
+      const rows = tn.layout === '3+3' ? [[-1, 3], [1, 3]] : [[tn.side === 'treble' ? 1 : -1, 6]];
+      for (const [sign, count] of rows) for (let k = 0; k < count; k++) {
+        const v = first + k * pitch, x = sign * (a + ((b - a) * k) / (count - 1)), w = v <= length ? widths(v) : { l: 0, r: 0 };
+        tuners.push({ x, v, d, side: sign < 0 ? 'bass' : 'treble', n: k + 1, gap: (sign < 0 ? w.l : w.r) - Math.abs(x) - d / 2 });
+      }
+    }
+    // a point of the headstock past the transition: x across, v along its face from the nut, w down into it from its face
+    const spot = (x, v, w) => (level ? { x, y: g.nutY + v, z: top - ramp(v) - w } : place(x, v, w));
+    head = { tuners, spot, side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, line };
   }
   const at = (y) => {
     const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;

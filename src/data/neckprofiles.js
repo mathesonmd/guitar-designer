@@ -34,8 +34,22 @@ export const NECK_SHAPE_START = { board: 0.25 * IN, fullness: 2, blend: 30 };
 //   kind          'angled' (tilted back from the nut) or 'flat' (level with the neck, its face stepped down)
 //   drop          flat only: how far the headstock's face is below the neck's top (the face the fretboard is glued to)
 //   scoop         flat only: the length past the nut over which the face curves down to that level
+//   tuners        the tuner holes (see TUNER_START)
 //   transition    the length past the nut over which the neck's round back becomes the headstock's flat one
-export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteAhead: 25, voluteStyle: 'smooth', tongueTip: 'round', tongueCove: 8, transition: 45, side: { on: false, points: [] }, tongueLine: { on: false, points: [] }, kind: 'angled', drop: 5, scoop: 22 };
+// Tuner holes: starting values with no published source (basis: assumed). Tuner makers publish the hole
+// their tuners need; set `hole` to that. The holes of a row lie on a straight line.
+//   layout   'none', '3+3' (three a side, mirrored) or '6' (six in a line on one side)
+//   side     for six in a line: 'bass' or 'treble'
+//   hole     the hole's diameter
+//   first    the first hole's distance from the nut, along the headstock
+//   pitch    the distance from one hole to the next, along the headstock
+//   inFirst  the first hole's distance from the centerline
+//   inLast   the last hole's distance from the centerline
+export const TUNER_START = { layout: 'none', side: 'bass', hole: 10, first: 38, pitch: 40, inFirst: 24, inLast: 30 };
+// what the four position numbers start at when a layout is chosen
+export const TUNER_LAYOUTS = { '3+3': { first: 38, pitch: 40, inFirst: 24, inLast: 30 }, 6: { first: 32, pitch: 25, inFirst: 8, inLast: 26 } };
+
+export const HEADSTOCK_START = { angle: 14, thickness: 15, voluteHeight: 4, voluteLength: 40, voluteAhead: 25, voluteStyle: 'smooth', tongueTip: 'round', tongueCove: 8, transition: 45, side: { on: false, points: [] }, tongueLine: { on: false, points: [] }, kind: 'angled', drop: 5, scoop: 22, tuners: { ...TUNER_START } };
 
 // A starting outline for the headstock: an original shape to redraw. It is drawn flat, at its true shape,
 // x across and y along the headstock's face from the nut. Its two ends are pinned to the corners of the

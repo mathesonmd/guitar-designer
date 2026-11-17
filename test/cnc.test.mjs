@@ -7,7 +7,8 @@ import { buildCncVectors, cncDXF, cncReadme } from '../src/export/cnc.js';
 import { expandArcs } from '../src/core/arcfit.js';
 import { bbox, signedArea } from '../src/core/poly.js';
 
-const make = (d = defaultDesign()) => { const g = derive(d, { tol: 0.005 }); return { d, g, v: buildCncVectors(d, g) }; };
+// (`v.files` here are the body's files; the headstock's own file, when there is one, is `v.head`)
+const make = (d = defaultDesign()) => { const g = derive(d, { tol: 0.005 }), all = buildCncVectors(d, g); return { d, g, all, v: { ...all, files: all.files.filter((f) => f.side !== 'headstock'), head: all.files.find((f) => f.side === 'headstock') } }; };
 const on = (file, re) => file.paths.filter((p) => re.test(p.layer));
 const box = (p) => bbox(expandArcs(p.verts, true));
 
@@ -139,4 +140,41 @@ test('the edge bevel\'s inner line is on its own layer, named with the depth at 
   assert.ok(b.x0 > g.bbox.x0 + 5 && b.x1 < g.bbox.x1 - 5 && b.y0 > g.bbox.y0 + 5, 'inside the outline');
   assert.equal(on(v.files[1], /EDGE_BEVEL/).length, 0);
   assert.match(cncReadme(d, v, ['t.dxf', 'b.dxf']), /a guide for 3D work, not a pocket/);
+});
+
+test('the headstock has its own file: its outline laid flat at true shape, and the tuner holes right through it', () => {
+  const d = defaultDesign();
+  const none = make(d);
+  assert.deepEqual(none.all.files.map((f) => f.side), ['top', 'back', 'headstock'], 'the headstock file comes last');
+  assert.ok(none.v.head.layers.every((L) => !/TUNER/.test(L.name)), 'no tuner layer until tuner holes are switched on');
+  const o = box(on(none.v.head, /^HEADSTOCK_OUTLINE$/)[0]), hd = none.g.neck.head;
+  assert.ok(Math.abs(o.y0) < 0.02 && Math.abs(o.y1 - hd.length) < 0.02 && Math.abs(o.w - 80) < 0.05, 'the outline stands on the nut line at y = 0 and is its true size');
+  assert.equal(on(none.v.head, /^GUIDE_CENTERLINE_AND_NUT_LINE$/).length, 2);
+  // three a side
+  d.neck.head.tuners = { ...d.neck.head.tuners, layout: '3+3' };
+  const { v, g } = make(d), holes = on(v.head, /^THROUGH_TUNER_10\.00MM_HOLE$/).filter((p) => p.circle), tn = g.neck.head.tuners;
+  assert.equal(holes.length, 6); assert.equal(tn.length, 6);
+  assert.ok(holes.every((p) => Math.abs(p.circle.r - 5) < 1e-9));
+  const want = [[-24, 38], [-27, 78], [-30, 118], [24, 38], [27, 78], [30, 118]];
+  for (const [x, y] of want) assert.ok(holes.some((p) => Math.abs(p.circle.x - x) < 1e-9 && Math.abs(p.circle.y - y) < 1e-9), `a hole at ${x}, ${y}: each row on a straight line from its first hole to its last`);
+  assert.ok(tn.every((t) => t.gap > 4 && t.gap < 12), 'each inside the outline, with wood outside it');
+  const L = v.head.layers.find((q) => /TUNER/.test(q.name));
+  assert.ok(L.count === 6 && L.depth === 15 && /right through the headstock, square to its face/.test(L.note));
+  assert.ok(v.files.every((f) => f.layers.every((q) => !/TUNER|HEADSTOCK/.test(q.name))), 'nothing of the headstock is in the body\'s files');
+  // six in a line, on either side; in inches the holes and the layer name are in inches
+  d.neck.head.tuners = { ...d.neck.head.tuners, layout: '6', side: 'treble', first: 32, pitch: 25, inFirst: 8, inLast: 26, hole: 8.73125 };
+  const six = make(d).g.neck.head.tuners;
+  assert.ok(six.length === 6 && six.every((t) => t.side === 'treble' && t.x > 0) && Math.abs(six[5].v - 157) < 1e-9 && Math.abs(six[5].x - 26) < 1e-9 && Math.abs(six[2].x - (8 + 18 * 2 / 5)) < 1e-9);
+  d.neck.head.tuners.side = 'bass';
+  const gi = derive(d, { tol: 0.005 }), inch = buildCncVectors(d, gi, { units: 'in' }).files.find((f) => f.side === 'headstock');
+  assert.ok(inch.layers.some((q) => q.name === 'THROUGH_TUNER_0.3438IN_HOLE') && on(inch, /TUNER/).every((p) => Math.abs(p.circle.r - 8.73125 / 2 / 25.4) < 1e-9 && p.circle.x < 0));
+  // a hole that breaks out of the outline is known as such
+  d.neck.head.tuners = { ...d.neck.head.tuners, inLast: 60 };
+  assert.ok(derive(d, { tol: 0.005 }).neck.head.tuners.some((t) => t.gap < 0));
+  // the read-me lists the file and says it is a separate part
+  const names = ['a-cnc-top.dxf', 'a-cnc-back.dxf', 'a-cnc-headstock.dxf'], all = buildCncVectors(d, gi), text = cncReadme(d, all, names.slice(0, all.files.length));
+  assert.match(text, /The headstock file is a separate part/); assert.match(text, /THROUGH_TUNER_8\.73MM_HOLE/); assert.match(text, /HEADSTOCK_OUTLINE\r\n\s+Headstock outline: cut right through, last/);
+  // no headstock, no file
+  d.neck.head.on = false;
+  assert.ok(!make(d).v.head);
 });

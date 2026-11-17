@@ -679,7 +679,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const b3 = (await state()).neck.back;
   assert(Math.abs(b3.t1 - 20.32) < 1e-9 && b3.profile === 'standardThin', `a box left without typing changes nothing (1st fret ${b3.t1})`);
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: tuner holes, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
   // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
   const h0 = (await state()).neck.head;
   assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
@@ -720,6 +720,16 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const sbar = await page.locator('.stage [data-k="pointbar"]').boundingBox(), sdot = await sp.nth(2).boundingBox();
   const scx = sdot.x + sdot.width / 2, scy = sdot.y + sdot.height / 2;
   assert(Math.hypot(Math.max(sbar.x - scx, scx - (sbar.x + sbar.width), 0), Math.max(sbar.y - scy, scy - (sbar.y + sbar.height), 0)) > 60, 'the point bar stays clear of the point here too');
+  // the selected point shows its two handles; dragging one reshapes the curve beside the point
+  const hd2 = page.locator('.stage [data-k="sidehandle"]');
+  assert(await hd2.count() === 2, 'the selected point shows a handle on each side');
+  const hb = await page.locator('.stage [data-k="sidehandle"][data-w="ho"] circle').last().boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + hb.width / 2 + 24, hb.y + hb.height / 2 + 30, { steps: 6 }); await page.mouse.up(); await settle(300);
+  const hp = (await state()).neck.head.side.points[2];
+  assert(Array.isArray(hp.ho) && hp.ho[1] > 0.5 && Array.isArray(hp.hi) && hp.hi[1] < -0.2 && Math.abs(hp.hi[0] * hp.ho[1] - hp.hi[1] * hp.ho[0]) < 0.2, `dragging a handle sets it, and the one opposite stays in line with it (${JSON.stringify(hp.ho)} and ${JSON.stringify(hp.hi)})`);
+  assert(hp.s === side2.points[2].s && hp.out === side2.points[2].out, 'the point itself did not move');
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Automatic handles")').click();
+  assert(!(await state()).neck.head.side.points[2].ho, 'Automatic handles hands them back to the app');
   await page.locator('.stage [data-k="pointbar"] button:has-text("Corner")').click();
   assert((await state()).neck.head.side.points[2].k === 'c', 'a point can be made a corner, for a peak');
   const lineBox = await page.locator('.stage [data-k="sideline"]').boundingBox(), pa = await sp.nth(1).boundingBox(), pb = await sp.nth(2).boundingBox();
@@ -766,6 +776,16 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   assert(/level with the neck, its face stepped down below the neck’s top/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel describes the flat headstock');
   await page.locator('section[data-sec="neck"] button:has-text("Angled back")').click();
   assert((await state()).neck.head.kind === 'angled' && await page.locator('#hs-angle').count() === 1, 'and back to angled');
+  // tuner holes: a layout, then numbers; shown on the drawing and listed in the build checks
+  await page.locator('section[data-sec="neck"] button:has-text("3 a side")').click(); await settle(300);
+  await setField('#tu-hole', '8.73 mm'); await setField('#tu-first', '50 mm');
+  const tu = (await state()).neck.head.tuners;
+  assert(tu.layout === '3+3' && Math.abs(tu.hole - 8.73) < 1e-6 && Math.abs(tu.first - 50) < 1e-6 && tu.pitch === 40 && tu.inFirst === 24 && tu.inLast === 30, 'three a side, with the hole and the first hole\'s place as typed');
+  assert(await page.locator('.stage [data-k="tuner"]').count() === 6, 'six holes are on the drawing');
+  assert(/6 holes, each row on a straight line/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says what the holes are and where they are saved');
+  await settle(1800);
+  const checksText = await page.locator('aside.rail').innerText();
+  assert(/Every tuner hole is inside the headstock/.test(checksText) && /Measure before you cut: tuner hole/.test(checksText), 'the build checks cover the tuner holes');
   await page.locator('section[data-sec="neck"] button:has-text("Peaked")').click();
   await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm'); await setField('#hs-va', '30 mm'); await setField('#hs-vl', '40 mm');
   const h1 = (await state()).neck.head;
@@ -781,7 +801,12 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   assert(/3D model of the neck/i.test(await dlg.innerText()) && /The headstock: .* tilted back 12° from the nut/.test(await dlg.innerText()) && /Not in the file: tuner holes/.test(await dlg.innerText()) && /The volute: peaked, standing out/.test(await dlg.innerText()) && /one continuous surface from the heel to the tip of the headstock/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
   files.neck = await saveDownload(() => dlg.locator('button:has-text("Save neck model (.step)")').click(), 120000);
   assert(fs.readFileSync(files.neck, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file of the neck saved');
-  fs.writeFileSync(path.join(dl, 'neck-design.json'), JSON.stringify(await state())); // the design this neck was saved from, for the independent check
+  fs.writeFileSync(path.join(dl, 'neck-design.json'), JSON.stringify(await state()));
+  // the vector pack again, now that the headstock has tuner holes, for the independent check
+  await dlg.locator('button:has-text("Save CNC vectors (.zip)")').scrollIntoViewIfNeeded();
+  const tunerPack = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
+  fs.renameSync(tunerPack, path.join(dl, 'tuners-cnc-pack.zip'));
+  assert(/third file holds the headstock/.test(await dlg.innerText()) && /its 6 tuner holes/.test(await dlg.innerText()), 'the dialog says the headstock has its own file with the tuner holes'); // the design this neck was saved from, for the independent check
   await dlg.locator('[data-k="neck-status"]:has-text("neck.step")').waitFor({ timeout: 5000 });
   await page.keyboard.press('Escape');
   await tab('Design'); await openSec('neck'); await setField('#nb-full', '2');

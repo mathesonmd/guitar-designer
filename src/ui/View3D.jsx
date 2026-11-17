@@ -138,6 +138,13 @@ export default function View3D({ design, g, solid, onSaveModel }) {
         const mesh = new THREE.Mesh(geo, maple);
         mesh.rotation.x = -hd.ang; mesh.position.set(0, g.nutY, neck.top - hd.drop);
         st.extras.add(mesh);
+        // tuner holes, shown as dark plugs right through the headstock (for looks: the holes themselves are cut from the vectors)
+        for (const t of hd.tuners) {
+          const plug = new THREE.Mesh(new THREE.CylinderGeometry(t.d / 2, t.d / 2, hd.thick + 0.5, 24), black);
+          const c = hd.spot(t.x, t.v, hd.thick / 2);
+          plug.position.set(c.x, c.y, c.z); plug.rotation.x = Math.PI / 2 - hd.ang;
+          st.extras.add(plug);
+        }
       }
     }
     const hw = h(g.nutY);

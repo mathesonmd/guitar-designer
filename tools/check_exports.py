@@ -389,6 +389,28 @@ for f in packs:
                 bs = [(bbox(expand(p)), area(expand(p))) for p in m]
                 want_area = c['w'] * c['h'] - (4 - math.pi) * c['r'] ** 2
                 check(any(abs((b[0] + b[2]) / 2 + c['x']) < 0.02 and abs((b[1] + b[3]) / 2 - c['y']) < 0.02 and abs(ar - want_area) < 0.5 for b, ar in bs), 'back file: %s mirrored across the centerline, at its depth and size' % c['name'])
+# the headstock's own file, with the tuner holes: positions worked out here from the saved design's numbers
+for f in glob.glob(D + '/tuners-cnc-pack.zip'):
+    nd = json.load(open(D + '/neck-design.json')); hd = nd['neck']['head']; tu = hd['tuners']
+    tz = zipfile.ZipFile(f)
+    hn = [n for n in tz.namelist() if n.endswith('-cnc-headstock.dxf')]
+    check(len(hn) == 1, 'the vector pack has one headstock file')
+    if hn:
+        hh, hp = parse_dxf(tz.read(hn[0]).decode())
+        circles = [p for p in hp if p.get('r') and 'TUNER' in p['layer']]
+        rows = [(-1, 3), (1, 3)] if tu['layout'] == '3+3' else [((1 if tu['side'] == 'treble' else -1), 6)]
+        want = [(sg * (tu['inFirst'] + (tu['inLast'] - tu['inFirst']) * k / (n - 1)), tu['first'] + k * tu['pitch']) for sg, n in rows for k in range(n)]
+        check(len(circles) == len(want) and all(abs(p['r'] - tu['hole'] / 2) < 1e-4 for p in circles), 'headstock file: %d tuner holes, %.2f mm across, as true circles' % (len(circles), tu['hole']))
+        check(all(any(abs(p['c'][0] - x) < 1e-4 and abs(p['c'][1] - y) < 1e-4 for p in circles) for x, y in want), 'each tuner hole is where the design\'s numbers put it, measured from the nut line and the centerline')
+        check(all(p['layer'] == 'THROUGH_TUNER_%.2fMM_HOLE' % tu['hole'] for p in circles), 'on a layer named with the hole\'s size')
+        outl = [p for p in hp if p['layer'] == 'HEADSTOCK_OUTLINE']
+        far = max(n['y'] for n in hd['outline']['nodes'])
+        if outl and outl[0].get('v'):
+            ys = [q[1] for q in outl[0]['v']]
+            check(abs(min(ys)) < 0.05 and abs(max(ys) - far) < 0.6, 'the headstock outline stands on the nut line and is %.1f mm long' % (max(ys) - min(ys)))
+        else:
+            check(len(outl) == 1, 'the headstock outline is one closed path')
+
 for f in glob.glob(D + '/*-cnc-vectors-inch.zip'):
     iz = zipfile.ZipFile(f)
     ihead, ipolys = parse_dxf(iz.read([n for n in iz.namelist() if n.endswith('-cnc-top.dxf')][0]).decode())

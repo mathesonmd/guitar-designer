@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 82 geometry and export tests (43 of them build the CAD solid)
+    npm test                  # 85 geometry and export tests (43 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 34 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -122,6 +122,14 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   editor). Then both the tongue's outline as a drawn line (`head.tongueLine`, the tongue outline editor)
   and the flat Fender-style headstock (`head.kind === 'flat'`: level, face stepped down, a scoop from the
   nut) on 14 November 2026.
+- He found the drawn side view "wavy in places and you can't fix it" and asked for Bezier curves
+  (17 November 2026): both drawn lines now have handles on every point (`handleCurve`, `lineEdit.js`).
+  A point without its own handles keeps the automatic smooth line.
+- Tuner holes (his go-ahead, 17 November 2026): from numbers, in the headstock's own vector file
+  (`...-cnc-headstock.dxf`, a third file in the pack, layers `HEADSTOCK_OUTLINE`,
+  `GUIDE_CENTERLINE_AND_NUT_LINE`, `THROUGH_TUNER_<size>_HOLE`). He has not yet seen that file or its
+  layer names: ask before changing them, as with the body's. The hole size has no source (assumed, on
+  the measure-before-you-cut list).
 - Number boxes (`Len`, `Num` in `widgets.jsx`) write nothing unless typed in. Before that, a box that
   still held focus could re-apply its old text after another control changed its value (a thickness
   typed, then a profile picked): it showed up as a click-through step failing one run in three.
@@ -163,10 +171,11 @@ roundover; a binding channel; hole depths entered per hardware; the neck as a 3D
 and a headstock, its outline drawn in the app, its back one surface with the neck's, with a smooth or
 peaked volute on the crown of the back, or a tongue (a flat with a crisp edge and a cove); the side view of the back and the tongue's
 outline can each be drawn in place of the numbers; the headstock can be angled back or flat (level with
-the neck, its face stepped down, with a scoop from the nut).
+the neck, its face stepped down, with a scoop from the nut); both drawn lines have Bezier handles; tuner
+holes (three a side or six in a line) on the drawing and in the headstock's own vector file.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
-carved tops, tuner holes, the nut slot, the neck's truss rod channel and
+carved tops, dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the neck's truss rod channel and
 heel screw holes, a sculpted
 heel on the body, STEP roundovers larger than the outline's
 tightest outside curve, the purfling channel in the STEP and STL (it is in the 3D picture and the CNC
@@ -192,7 +201,8 @@ touch gestures, Safari and Firefox are untried.
 - The headstock: whether the tongue matches his photos, whether the two drawn lines (side view, tongue
   outline) give him the control he wants, whether the flat headstock's scoop and step look right, whether
   "peak" means a point on the crown, as built; and his numbers for angle, thickness, transition, volute,
-  tongue, and the flat headstock's step and scoop.
+  tongue, and the flat headstock's step and scoop; whether the headstock vector file and its layer names
+  suit him, and his tuner hole size and spacing.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.

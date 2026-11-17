@@ -315,6 +315,7 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
 
           <path d={outlineD} stroke={editing && of === 'body' ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing && of === 'body' ? 1.8 : 1.6} {...NS} style={{ pointerEvents: 'none' }} />
           {headD && <path d={headD} fill="var(--anvil)" fillOpacity=".5" stroke={editing && of === 'head' ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing && of === 'head' ? 1.8 : 1.4} {...NS} style={{ pointerEvents: 'none' }} />}
+          {g.neck && g.neck.head && g.neck.head.tuners.map((t, i) => <circle key={'tuner' + i} data-k="tuner" cx={t.x} cy={t.v + g.nutY} r={t.d / 2} fill="var(--ink, #151210)" stroke={t.gap < 0 ? 'var(--ember, #e2642f)' : 'var(--bone)'} strokeWidth="1" {...NS} style={{ pointerEvents: 'none' }} />)}
           {headD && <path d={headD} stroke="transparent" strokeWidth="14" fill="none" {...NS} data-k="outline" data-of="head" style={{ cursor: 'pointer' }} />}
           <path d={outlineD} stroke="transparent" strokeWidth="14" {...NS} data-k="outline" style={{ cursor: 'pointer' }} />
 

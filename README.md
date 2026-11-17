@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 82 geometry and export tests (Node, no browser)
+    npm test               # 85 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -210,6 +210,21 @@ CAD solid; the 3D view draws the same cross-sections.
   curves down from the neck's line to the headstock's back, which is deeper. The transition is never
   shorter than the scoop plus 5 mm. Everything else (volute, tongue, drawn lines, the stitched solid) is
   the same code as the angled headstock with an angle of 0.
+- Both drawn lines are Bezier curves (`handleCurve` in `neck.js`, `src/ui/lineEdit.js`). Each point has a
+  handle on either side, stored as an [along, value] offset; a point with no handles of its own gets
+  automatic ones (a third of the way to each neighbor, along the smooth never-overshooting line the
+  editors had before, so older designs draw exactly as they did). Because the line must give one value at
+  each place along the neck, a handle reaches no farther along than the next point, and two that would
+  pass each other are shortened until they meet. Dragging a handle on a smooth point turns the opposite
+  one to stay in line; on a corner it does not. "Automatic handles" drops a point's own handles.
+- Tuner holes (`head.tuners`): none, three a side, or six in a line on either side. Each row lies on a
+  straight line from its first hole to its last, set by five numbers. They are on the drawing, in the 3D
+  view as dark plugs, in the build checks (inside the outline, clear of the carved transition, hole size
+  to measure), and in the headstock's own vector file. They are not cut into the 3D model of the neck.
+- The vector pack has a third file when the neck has a headstock: `...-cnc-headstock.dxf`, the headstock's
+  front face laid flat at its true shape (x across, y along from the nut line), on layers
+  `HEADSTOCK_OUTLINE`, `GUIDE_CENTERLINE_AND_NUT_LINE` and `THROUGH_TUNER_<size>_HOLE`. It is a separate
+  part with its own box and does not line up with the body files.
 - The CAD solid is built with no cutting or joining operations. The skin joins each cross-section to the
   next with straight lines; sections are 1 mm apart wherever the shape is changing (within about 0.01 mm
   of the true curve) and 10 mm apart on the plain shaft. The heel block and the flat of the headstock are

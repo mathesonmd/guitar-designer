@@ -1,6 +1,6 @@
 // 2D vectors for cutting pockets and holes on a CNC router: every opening at its finished edge and
-// true position, with no template offsets. One DXF for work done from the top of the body and one for
-// work done from the back. Each layer is named for what it is and how deep it goes, so the depth can be
+// true position, with no template offsets. One DXF for work done from the top of the body, one for
+// work done from the back, and one for the headstock (its outline and tuner holes) when the neck has one. Each layer is named for what it is and how deep it goes, so the depth can be
 // read straight off the layer list in the CAM program.
 //
 // Coordinates are the design's own: x = 0 is the centerline, y = 0 is the scale line. The files are
@@ -90,7 +90,26 @@ export function buildCncVectors(design, g, { units = 'mm' } = {}) {
   const top = make('top'), back = make('back');
   // a back file is only worth saving when something is cut from the back
   const backWork = back.layers.some((L) => L.name.startsWith('BACK_'));
-  return { units, files: backWork ? [top, back] : [top], unverified: unverifiedNeckKeys(design), box: g.bbox, pocketOverrun };
+  // The headstock, when the neck has one: its front face laid flat at its true shape, as a part of its
+  // own (x across, y along from the nut line). It carries the tuner holes. It has its own box and does not
+  // line up with the body files.
+  const files = backWork ? [top, back] : [top];
+  const hd = g.neck && g.neck.head;
+  if (hd) {
+    const layers = [], paths = [], thick = hd.thick;
+    const layer = (name, what, depth, note, aci) => { let L = layers.find((q) => q.name === name); if (!L) { L = { name, aci, what, count: 0, depth, note }; layers.push(L); } L.count++; return name; };
+    paths.push({ layer: layer('HEADSTOCK_OUTLINE', 'Headstock outline', thick, `cut right through, last; ${both(thick)} thick; the straight edge is the nut line`, 1), closed: true, verts: S(fitArcs(hd.poly, 0.01, true)) });
+    layers.push({ name: 'GUIDE_CENTERLINE_AND_NUT_LINE', aci: 8, what: 'Centerline and nut line', count: 0, depth: null, note: 'for lining up only: do not cut' });
+    const half = Math.abs(hd.poly[0].x);
+    for (const [a, b] of [[{ x: 0, y: 0 }, { x: 0, y: hd.length }], [{ x: -half, y: 0 }, { x: half, y: 0 }]]) paths.push({ layer: layer('GUIDE_CENTERLINE_AND_NUT_LINE'), closed: false, verts: S([a, b].map((q) => ({ x: q.x, y: q.y, bulge: 0 }))) });
+    for (const t of hd.tuners) {
+      const name = layer(`THROUGH_TUNER_${sized(t.d, units)}_HOLE`, 'Tuner holes', thick, `${both(t.d)} across, right through the headstock, square to its face`, 5);
+      const c = { x: t.x * k, y: t.v * k, r: (t.d / 2) * k };
+      paths.push({ layer: name, closed: true, circle: c, verts: [[-1, 0], [0, -1], [1, 0], [0, 1]].map(([ux, uy]) => ({ x: c.x + ux * c.r, y: c.y + uy * c.r, bulge: QUARTER })) });
+    }
+    files.push({ side: 'headstock', name: 'Front of the headstock, laid flat at its true shape', layers, paths });
+  }
+  return { units, files, unverified: unverifiedNeckKeys(design), box: g.bbox, pocketOverrun };
 }
 
 export const cncDXF = (file, units = 'mm') => toDXF({ sheets: [{ paths: file.paths }] }, file.layers, units);
@@ -125,16 +144,17 @@ export function cncReadme(design, vectors, fileNames) {
     vectors.pocketOverrun > 0
       ? `  LINING UP WITH THE 3D MODEL: the neck pocket runs ${both(vectors.pocketOverrun)} above the body outline's box, so the vectors' box is that much taller than the model's. Line them up by the body outline, not by centering both.`
       : '  LINING UP WITH THE 3D MODEL: nothing in these files reaches outside the body outline\'s box, which is also the 3D model\'s box. Centering the vectors and the model in your CAM program puts them in register.',
-    vectors.files.length > 1
+    vectors.files.some((f) => f.side === 'back')
       ? '  The back file is mirrored across the centerline: it shows the back as you see it after turning the body over like the page of a book.'
       : '  Nothing in this design is cut from the back, so there is no back file.',
+    ...(vectors.files.some((f) => f.side === 'headstock') ? ['  The headstock file is a separate part: its front face laid flat at its true shape, x across and y along from', '  the nut line. It has its own box and does not line up with the body files. Tuner holes go right through,', '  square to the face.'] : []),
     '',
   ];
   vectors.files.forEach((f, i) => {
     lines.push(`${fileNames[i]}   ${f.name}`);
     for (const L of f.layers) {
       lines.push(`  ${L.name}`);
-      const isPocket = L.depth !== null && L.name !== 'BODY_OUTLINE' && !/_THROUGH$|^THROUGH_/.test(L.name);
+      const isPocket = L.depth !== null && !/_OUTLINE$/.test(L.name) && !/_THROUGH$|^THROUGH_/.test(L.name);
       lines.push(`      ${[`${L.what}${L.count > 1 ? ' x' + L.count : ''}`, isPocket ? `${both(L.depth)} deep` : '', L.note].filter(Boolean).join(': ').replace(/deep: /, 'deep; ')}`);
     }
     lines.push('');
