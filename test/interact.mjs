@@ -720,6 +720,19 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const sbar = await page.locator('.stage [data-k="pointbar"]').boundingBox(), sdot = await sp.nth(2).boundingBox();
   const scx = sdot.x + sdot.width / 2, scy = sdot.y + sdot.height / 2;
   assert(Math.hypot(Math.max(sbar.x - scx, scx - (sbar.x + sbar.width), 0), Math.max(sbar.y - scy, scy - (sbar.y + sbar.height), 0)) > 60, 'the point bar stays clear of the point here too');
+  // a handle lies along the curve at its point: measured on the picture, past the nut, where the back slopes away
+  await sp.nth(3).click(); await settle(300);
+  const offCurve = await page.evaluate(() => {
+    const d = document.querySelector('[data-k="sideline"]').getAttribute('d').replace(/[ML]/g, ' ').trim().split(/\s+/).map(Number), P = [];
+    for (let i = 0; i < d.length; i += 2) P.push([d[i], d[i + 1]]);
+    return [...document.querySelectorAll('[data-k="sidehandle"]')].map((g) => {
+      const l = g.querySelector('line'), x1 = +l.getAttribute('x1'), y1 = +l.getAttribute('y1'), x2 = +l.getAttribute('x2'), y2 = +l.getAttribute('y2');
+      const dir = x2 > x1 ? 1 : -1, near = (x) => P.reduce((b, q) => (Math.abs(q[0] - x) < Math.abs(b[0] - x) ? q : b)), a = near(x1), q = near(x1 + dir * 4);
+      return Math.abs(Math.atan2((x2 - x1) * (q[1] - a[1]) - (y2 - y1) * (q[0] - a[0]), (x2 - x1) * (q[0] - a[0]) + (y2 - y1) * (q[1] - a[1]))) * 180 / Math.PI;
+    });
+  });
+  assert(offCurve.length === 2 && offCurve.every((a) => a < 6), `each handle lies along the curve at its point (${offCurve.map((a) => a.toFixed(1)).join(' and ')} degrees off)`);
+  await sp.nth(2).click(); await settle(300);
   // the selected point shows its two handles; dragging one reshapes the curve beside the point
   const hd2 = page.locator('.stage [data-k="sidehandle"]');
   assert(await hd2.count() === 2, 'the selected point shows a handle on each side');

@@ -48,7 +48,13 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
   const face = [[s0, 0], [0, 0]]; for (let s = 1; s <= s1; s += 1) face.push([s, hd.faceZ(nutY + s) - top]); face.push([s1, hd.faceZ(nutY + s1) - top]);
   const body = path(face) + ' ' + crown.slice().reverse().map((p) => 'L' + X(p[0]).toFixed(1) + ' ' + Y(p[1]).toFixed(1)).join(' ') + ' Z';
   // where each point sits on the picture: on the crown of the section at its place along the neck
-  const spot = (p) => { if (p.s <= 0) return [p.s, -neck.at(nutY + p.s).depth]; const c = hd.at(p.s).p3[25]; return [c[1] - nutY, c[2] - top]; };
+  // Where each point sits on the picture: on the back's own line, which is the plain line of the back less
+  // how far the point stands out. The slope of the plain line there turns a handle (kept as how the
+  // standing-out changes along the neck) into the direction the back's line really takes on the picture,
+  // so a handle always lies along the curve at its point.
+  const plainAt = (sv) => hd.backZ(nutY + sv) - top;
+  const slopeAt = (sv) => (plainAt(sv + 0.01) - plainAt(sv - 0.01)) / 0.02;
+  const spot = (p) => [p.s, plainAt(p.s) - p.out];
   const fixedOut = (i) => i === last || (i === 0 && !free);
 
   const store = (list) => edit((d) => ({ ...d, neck: { ...d.neck, head: { ...d.neck.head, side: { on: true, points: list.map((p) => stored(p, 'out')) } } } }));
@@ -68,9 +74,9 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
   const move = (e) => {
     const dr = drag.current; if (!dr) return;
     const w = world(e), i = dr.i;
-    if (dr.which) { store(dragHandle(pts, side.used, i, dr.which, [dr.h[0] + (w.s - dr.at.s), dr.h[1] - (w.z - dr.at.z)])); return; } // (down the screen is farther out)
+    if (dr.which) { const ds = w.s - dr.at.s; store(dragHandle(pts, side.used, i, dr.which, [dr.h[0] + ds, dr.h[1] + slopeAt(pts[i].s) * ds - (w.z - dr.at.z)])); return; }
     const list = pts.map((p) => ({ ...p }));
-    const lo = i === 0 ? -150 : pts[i - 1].s + 2, hi = i === last ? hd.reach - 2 : Math.min(pts[i + 1].s - 2, i === 0 && free ? -2 : Infinity);
+    const lo = i === 0 ? -150 : pts[i - 1].s + 2, hi = i === last ? hd.lineEnd : Math.min(pts[i + 1].s - 2, i === 0 && free ? -2 : Infinity);
     list[i].s = Math.max(lo, Math.min(hi, dr.p.s + (w.s - dr.at.s)));
     if (!fixedOut(i)) list[i].out = Math.max(-6, Math.min(15, dr.p.out - (w.z - dr.at.z)));
     dr.moved = true;
@@ -87,7 +93,7 @@ export default function SideView({ design, g, setSel, edit, begin, commit }) {
   const setKind = (i, kind) => { begin(); store(setPointKind(pts, side.used, i, kind)); commit(); };
   const auto = (i) => { begin(); store(autoHandles(pts, i)); commit(); };
   // where a handle of the selected point ends on the picture
-  const tipOf = (i, which) => { const c = spot(pts[i]), h = side.used[i][which]; return [c[0] + h[0], c[1] - h[1]]; };
+  const tipOf = (i, which) => { const c = spot(pts[i]), h = side.used[i][which]; return [c[0] + h[0], c[1] + slopeAt(pts[i].s) * h[0] - h[1]]; };
 
   const sel = pick != null && pick <= last ? pts[pick] : null, at = sel && spot(sel), sx = at && X(at[0]), sy = at && Y(at[1]);
   return (

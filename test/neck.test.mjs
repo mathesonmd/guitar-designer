@@ -11,6 +11,17 @@ import { backCurve, sideLine, tongueOutline } from '../src/model/neck.js';
 import { fretDistance } from '../src/core/fret.js';
 import { dragHandle, setPointKind, autoHandles, stored } from '../src/ui/lineEdit.js';
 
+// The side view of the back is one curve: the plain line of the back, less how far the volute or the
+// tongue's flat stands out at each place along the neck. The crown of every cross-section must lie on it,
+// on the neck and past the nut (where the sections lean), so the line drawn in the side view is the line built.
+const onCurve = (g, name) => {
+  const n = g.neck, h = n.head;
+  for (const q of [...n.sections.filter((c) => c.y > g.nutY - 80), ...h.sections]) {
+    const c = q.p3[25], want = h.backZ(c[1]) - h.centerOut(c[1] - g.nutY);
+    assert.ok(Math.abs(c[0]) < 1e-9 && Math.abs(c[2] - want) < 1e-6, `${name}: the crown ${(c[1] - g.nutY).toFixed(1)} mm from the nut is ${(c[2] - want).toFixed(4)} mm off the side-view curve`);
+  }
+};
+
 let oc;
 before(async () => { oc = await start(); rc.setOC(oc); });
 const pct = (a, b) => Math.abs(a / b - 1) * 100;
@@ -130,7 +141,8 @@ test('volute: a mound on the crown of the back, highest under the nut, gone at t
   assert.ok(h.bump(1, 0) === 0 && h.bump(0, 1) === 0 && h.bump(0.999, 0) < 1e-4);
   assert.ok(Math.abs(n.at(g.nutY - 40).depth - none.at(g.nutY - 40).depth) < 1e-9 && n.at(g.nutY - 39).depth > none.at(g.nutY - 39).depth, 'it starts 40 mm behind the nut');
   assert.ok(Math.abs(n.at(g.nutY - 20).depth - none.at(g.nutY - 20).depth - 4 * 0.75 ** 2) < 1e-9, 'half way along, 9/16 of the height');
-  assert.ok(Math.abs(h.at(12.5).depth - none.head.at(12.5).depth - 4 * 0.75 ** 2) < 1e-9 && h.at(25).depth === none.head.at(25).depth, 'the headstock side is the same shape squeezed into 25 mm, so it is the steeper');
+  assert.ok(Math.abs(h.swell(12.5, 0) - 4 * 0.75 ** 2) < 1e-9 && h.swell(25, 0) === 0 && h.swell(24.9, 0) > 0, 'the headstock side is the same shape squeezed into 25 mm, so it is the steeper');
+  onCurve(g, 'mound volute');
   // its foot toward the heel is a rounded line: it reaches farthest down the neck on the centerline
   const reachAt = (across) => { let a = 0; while (h.bump(a + 0.001, across) > 0) a += 0.001; return a * 40; };
   assert.ok(Math.abs(reachAt(0) - 40) < 0.1 && reachAt(0.5) < reachAt(0) - 4 && reachAt(0.9) < reachAt(0.5) - 10 && reachAt(1) === 0);
@@ -273,6 +285,11 @@ test('side view drawn: it takes the place of the volute\'s numbers, starts close
   const lh = derive(lop, { tol: 0.005 }).neck.head;
   for (const across of [0.1, 0.3, 0.6, 0.9]) assert.ok(Math.abs(lh.swell(-3.001, across) - lh.swell(-2.999, across)) < 0.01, `no step across the highest point, ${across} of the way to the edge`);
   for (let sv = -70; sv <= 22; sv += 1) assert.ok(Math.abs(lh.swell(sv, 0) - lh.side.out(sv)) < 1e-9, 'on the centerline it is the drawn line');
+  onCurve(derive(lop, { tol: 0.005 }), 'lopsided drawn line'); onCurve(g, 'drawn from the numbers');
+  const steep = defaultDesign(); steep.neck.head = { ...steep.neck.head, angle: 20, side: { on: true, points: [{ s: -50, out: 0 }, { s: -10, out: 6, ho: [12, 3] }, { s: 8, out: 5, k: 'c' }, { s: 30, out: 0 }] } };
+  onCurve(derive(steep, { tol: 0.005 }), 'a steep headstock with hand-set handles');
+  const lvl = defaultDesign(); lvl.neck.head = { ...lvl.neck.head, kind: 'flat', side: { on: true, points: [{ s: -40, out: 0 }, { s: 0, out: 3 }, { s: 20, out: 0 }] } };
+  onCurve(derive(lvl, { tol: 0.005 }), 'a flat headstock');
   assert.ok(lh.swell(-3, 1) === 0 && lh.swell(-60, 0.7) === 0 && lh.swell(15, 0.9) === 0);
   d.neck.head.side = { on: true, points: [{ s: -60, out: 0 }, { s: -25, out: 5 }, { s: 0, out: 4 }, { s: 12.5, out: 2.25 }, { s: 25, out: 0 }] };
   const g2 = derive(d, { tol: 0.005 }), n2 = g2.neck;
@@ -286,9 +303,12 @@ test('side view drawn: it takes the place of the volute\'s numbers, starts close
   // a tongue: the drawn line is the height of its flat, and its first point is the tip
   const t = defaultDesign(); t.neck.head = { ...t.neck.head, voluteStyle: 'tongue', voluteHeight: 2, voluteLength: 28 };
   const ts = makeSideLine(derive(t, { tol: 0.005 }).neck.head);
-  assert.deepEqual(ts.map((p) => p.s), [-28, 0, 21.5, 43]); assert.ok(ts[0].out === 2 && ts[3].out === 0);
+  const tEnd = derive(t, { tol: 0.005 }).neck.head.lineEnd; // where the last leaning section's centerline meets the back: a drawn line ends by there
+  assert.ok(Math.abs(tEnd - (45 * Math.cos(14 * Math.PI / 180) - 15 * Math.sin(14 * Math.PI / 180) - 1)) < 1e-9);
+  assert.ok(ts.length === 4 && ts[0].s === -28 && ts[1].s === 0 && Math.abs(ts[3].s - tEnd) < 0.006 && Math.abs(ts[2].s - tEnd / 2) < 0.006 && ts[0].out === 2 && ts[3].out === 0);
   t.neck.head.side = { on: true, points: [{ s: -35, out: 1 }, { s: 0, out: 3 }, { s: 43, out: 0 }] };
   const tn = derive(t, { tol: 0.005 }).neck;
+  onCurve(derive(t, { tol: 0.005 }), 'a tongue with its side view drawn');
   assert.ok(tn.head.swell(-60, 0) === 0 && Math.abs(tn.at(tn.nutY - 60).depth - derive(defaultDesign(), { tol: 0.005 }).neck.at(tn.nutY - 60).depth + 0) < 1e-9, 'behind the tongue\'s tip and its cove the neck is untouched');
   assert.ok(tn.head.tongue.tip === -35 && Math.abs(tn.head.tongue.proud(-35) - 1) < 1e-12 && Math.abs(tn.head.tongue.proud(0) - 3) < 1e-12 && tn.head.tongue.proud(43) === 0);
   // an older file has no drawn side view

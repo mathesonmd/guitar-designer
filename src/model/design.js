@@ -131,10 +131,10 @@ export function makeHeadstock() {
 export function makeSideLine(shape) {
   const r = (v) => Math.round(v * 100) / 100, pt = (s, out, k = 's') => ({ s: r(s), out: r(out), k });
   if (shape.tongue) {
-    const tip = shape.tongue.tip, end = shape.reach - 2;
+    const tip = shape.tongue.tip, end = shape.lineEnd;
     return [pt(tip, shape.rise), pt(0, shape.rise), pt(end / 2, shape.tongue.proud(end / 2)), pt(end, 0)];
   }
-  const h = Math.max(shape.rise, 0), run = shape.run, fall = Math.min(shape.fall, shape.reach - 2);
+  const h = Math.max(shape.rise, 0), run = shape.run, fall = Math.min(shape.fall, shape.lineEnd);
   return [pt(-run, 0), pt(-run / 2, shape.bump(0.5, 0)), pt(0, h || 0, shape.peaked ? 'c' : 's'), pt(fall / 2, shape.bump(0.5, 0)), pt(fall, 0)];
 }
 

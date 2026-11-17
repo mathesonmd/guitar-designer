@@ -271,7 +271,11 @@ export function buildNeck(design, g) {
     // the transition length, measured along the headstock's face from the nut
     // (on a flat headstock it is never shorter than the scoop: the face must be level before the flat begins)
     const reach = Math.max(level ? scoop + 5 : 0, Math.max(20, Math.min(h.transition, 80, length * 0.6)));
-    const fall = Math.min(fallAsked, reach - 2);
+    // The volute, the tongue's rise and a drawn side view all have to be gone by `lineEnd`: the place along
+    // the neck where the centerline of the last leaning section meets the back. (On an angled headstock
+    // that is a little short of the transition length, because that section leans back toward the nut.)
+    const lineEnd = Math.max(5, Math.min(reach - 2, reach * cos - thick * sin - 1));
+    const fall = Math.min(fallAsked, lineEnd);
     const behind = reach / 3;                       // the back starts to turn this far behind the nut
     const ahead = Math.max(5, reach * cos - thick * sin); // and has become the headstock's back this far past it
     // a point of the headstock: x across, v along its face from the nut, w down into it from its face
@@ -295,7 +299,7 @@ export function buildNeck(design, g) {
     // It gives how far the back stands out along the centerline; away from the centerline that falls off
     // the same way the mound does, so its foot is still a rounded line and it still arrives level at the
     // neck's edges. (For a tongue the drawn line is the height of the tongue's flat instead.)
-    const side = h.side && h.side.on ? sideLine(h.side.points, { freeStart: flatStyle, max: reach - 2 }) : null;
+    const side = h.side && h.side.on ? sideLine(h.side.points, { freeStart: flatStyle, max: lineEnd }) : null;
     const swell = (sv, across) => {
       if (flatStyle) return 0; // a tongue is not a mound: its height is handled with its flat
       if (!side) return bump(sv < 0 ? -sv / run : sv / fall, across);
@@ -378,14 +382,15 @@ export function buildNeck(design, g) {
         return best;
       };
       const inside = (x, sv) => sv > tip && x > -halfOf(sv, -1) && x < halfOf(sv, 1);
-      const proud = (sv) => (side ? side.out(sv) : rise * (sv <= 0 ? 1 : 1 - ease(sv / reach)));
+      const proud = (sv) => (side ? side.out(sv) : rise * (sv <= 0 ? 1 : 1 - ease(sv / lineEnd)));
       const wall = (u) => (u >= 1 ? 0 : 1 - Math.sqrt(1 - (1 - u) * (1 - u)));
       // The cove is as wide as set where there is room, and narrower where the tongue's edge is close to
       // the edge of the neck or headstock (`room` is the half-width there), so that it always runs out
       // before that edge and never leaves a step on it.
       const coveAt = (sv, sign, room) => Math.max(0.3, Math.min(cove, room - halfOf(sv, sign) - 0.5));
       // depth of the back at a place: `round` is the neck's round back there, `crown` its depth on the centerline
-      const depthAt = (x, sv, round, crown, room) => (inside(x, sv) ? crown + proud(sv) : round + (crown + proud(sv) - round) * wall(away(x, sv) / coveAt(sv, x < 0 ? -1 : 1, room)));
+      // (`lift`: how far the tongue's flat stands out there, when the caller has worked it out; left out, it is proud(sv))
+      const depthAt = (x, sv, round, crown, room, lift = proud(sv)) => (inside(x, sv) ? crown + lift : round + (crown + lift - round) * wall(away(x, sv) / coveAt(sv, x < 0 ? -1 : 1, room)));
       const flatAt = (sv) => {
         const l = halfOf(sv, -1), r = halfOf(sv, 1), near = [];
         for (let k = 1; k <= 30; k++) { const d = (cove * k * k) / 900; near.push(l + d, r + d); }
@@ -393,6 +398,8 @@ export function buildNeck(design, g) {
       };
       tongue = { line, tip, cove, spread, atNut, pointed: pw < 2, halfOf, inside, away, proud, coveAt, depthAt, flatAt, from: tip - cove - 1 };
     }
+    // how far the back stands out on the centerline at a place along the neck: the tongue's flat, or the volute's crown
+    const centerOut = (sv) => (tongue ? (sv < tongue.tip ? tongue.depthAt(0, sv, 0, 0, nutHalf) : tongue.proud(sv)) : swell(sv, 0));
     const station = (v) => {
       const th = ang * ease(v / fan), st = Math.sin(th), ct = Math.cos(th);
       const oy = g.nutY + v * cos, oz = top - v * sin - ramp(v);
@@ -403,9 +410,22 @@ export function buildNeck(design, g) {
         for (let k = 0; k < 50; k++) { const t = (lo + hi) / 2; if (oz - t * ct > zBack(oy - t * st)) lo = t; else hi = t; }
         base = (lo + hi) / 2;
       }
+      // How far the back stands out on the centerline here. The side view of the back is one curve: the
+      // plain line of the back, less how far the volute (or the tongue's flat) stands out at each place
+      // along the neck. This section leans, so its centerline meets that curve a little way from where
+      // the section meets the face: find where, so that the crown of every section lies exactly on the
+      // curve, and the line drawn in the side view is the line the neck is built to.
+      let lift = 0, sHit = v;
+      if (v < reach) {
+        let lo = 0, hi = 90;
+        for (let k = 0; k < 50; k++) { const t = (lo + hi) / 2, y = oy - t * st; if (oz - t * ct > zBack(y) - centerOut(y - g.nutY)) lo = t; else hi = t; }
+        lift = (lo + hi) / 2 - base; sHit = oy - ((lo + hi) / 2) * st - g.nutY;
+      }
+      // away from the centerline the volute falls off as it does at that place along the neck, scaled so the crown is exact
+      const here = swell(sHit, 0), scale = Math.abs(here) > 1e-9 ? lift / here : 1;
       const w = widths(Math.min(v, reach)), spare = SPARE * Math.min(1, v / reach) ** 2, n = fullness * (SQUARE / fullness) ** ease(v / reach);
       const to3 = (p) => [p.x, oy + p.z * st, oz + p.z * ct];
-      const shift = tongue ? (p) => { p.z = -tongue.depthAt(p.x, v, -p.z, base, p.x < 0 ? w.l : w.r); } : (p) => { p.z -= swell(v, Math.abs(p.x) / nutHalf); };
+      const shift = tongue ? (p) => { p.z = -tongue.depthAt(p.x, v, -p.z, base, p.x < 0 ? w.l : w.r, lift); } : (p) => { p.z -= scale * swell(sHit, Math.abs(p.x) / nutHalf); };
       let { pts, p3, din, dout } = sampled(w.l + spare, base, n, w.r + spare, shift, to3, v > 0 ? limit : null, tongue ? tongue.flatAt(v) : null);
       if (v >= reach) {
         // the end of the transition is the flat part's own section, exactly: square corners and a straight back,
@@ -415,7 +435,7 @@ export function buildNeck(design, g) {
         pts.push({ x: w.r, z: 0 });
         p3 = pts.map(to3); din = dout = pts.slice(1, -1).map(() => [1, 0, 0]);
       }
-      return { v, y: oy, left: w.l, right: w.r, spare, base, depth: tongue ? tongue.depthAt(0, v, base, base, w.r) : base + swell(v, 0), n, pts, din, dout, p3 };
+      return { v, y: oy, left: w.l, right: w.r, spare, base, depth: base + lift, lift, n, pts, din, dout, p3 };
     };
     // a section every STRIP through the transition
     const count = Math.max(8, Math.round(reach / STRIP)), vs = [];
@@ -447,7 +467,7 @@ export function buildNeck(design, g) {
     }
     // a point of the headstock past the transition: x across, v along its face from the nut, w down into it from its face
     const spot = (x, v, w) => (level ? { x, y: g.nutY + v, z: top - ramp(v) - w } : place(x, v, w));
-    head = { tuners, spot, side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, line };
+    head = { lineEnd, tuners, spot, centerOut, side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, line };
   }
   const at = (y) => {
     const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;

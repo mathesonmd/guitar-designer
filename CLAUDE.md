@@ -125,6 +125,11 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 - He found the drawn side view "wavy in places and you can't fix it" and asked for Bezier curves
   (17 November 2026): both drawn lines now have handles on every point (`handleCurve`, `lineEdit.js`).
   A point without its own handles keeps the automatic smooth line.
+  His first try of them: "they aren't right. They should be tangential to the line". Two causes, both
+  fixed: handles were drawn without the slope of the plain line under them, and the neck was not built
+  to exactly the curve shown (sections past the nut lean). Now every section's crown lies on the drawn
+  curve (`head.centerOut`, tested by `onCurve` in `test/neck.test.mjs`) and a handle lies along it.
+  Check any change to the side view by measuring, on the picture, the angle between a handle and the curve.
 - Tuner holes (his go-ahead, 17 November 2026): from numbers, in the headstock's own vector file
   (`...-cnc-headstock.dxf`, a third file in the pack, layers `HEADSTOCK_OUTLINE`,
   `GUIDE_CENTERLINE_AND_NUT_LINE`, `THROUGH_TUNER_<size>_HOLE`). He has not yet seen that file or its

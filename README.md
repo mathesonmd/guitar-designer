@@ -217,6 +217,16 @@ CAD solid; the 3D view draws the same cross-sections.
   each place along the neck, a handle reaches no farther along than the next point, and two that would
   pass each other are shortened until they meet. Dragging a handle on a smooth point turns the opposite
   one to stay in line; on a corner it does not. "Automatic handles" drops a point's own handles.
+- The side view of the back is one curve: the plain line of the back, less how far the volute or the
+  tongue's flat stands out at each place along the neck (`head.centerOut`). The crown of every
+  cross-section lies on it. Past the nut the sections lean, so each one's centerline meets the curve a
+  little way from where the section meets the face; the section finds that place and takes its height
+  there. (Before 17 November 2026 the height was looked up by the section's own place along the face,
+  so the built back sat up to a few millimeters along from the line drawn.) A drawn line, the volute and
+  a tongue's rise all end by `head.lineEnd`, where the last leaning section's centerline meets the back.
+- In the side view editor a handle is drawn along the back's line as it really runs on the picture: its
+  stored rise is combined with the slope of the plain line at its point. (Drawn without that slope,
+  handles past the nut sat at an angle to the curve they were shaping: the owner's complaint.)
 - Tuner holes (`head.tuners`): none, three a side, or six in a line on either side. Each row lies on a
   straight line from its first hole to its last, set by five numbers. They are on the drawing, in the 3D
   view as dark plugs, in the build checks (inside the outline, clear of the carved transition, hole size
