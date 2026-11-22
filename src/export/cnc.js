@@ -114,7 +114,7 @@ export function buildCncVectors(design, g, { units = 'mm' } = {}) {
 
 export const cncDXF = (file, units = 'mm') => toDXF({ sheets: [{ paths: file.paths }] }, file.layers, units);
 
-const NECK_WORDS = { nutToHeel: 'nut to end of heel', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'neck screw position', boardPastHeel: 'fretboard overhang' };
+const NECK_WORDS = { nutToHeel: 'nut to end of heel', nutWidth: 'nut width', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'neck screw position', boardPastHeel: 'fretboard overhang' };
 
 export function cncReadme(design, vectors, fileNames) {
   const T = design.body.thickness;

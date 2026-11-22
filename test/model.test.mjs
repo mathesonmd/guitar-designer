@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { defaultDesign, normalizeDesign, STARTERS, makeBridge, applyNeckPreset, unverifiedNeckKeys, neckBasis } from '../src/model/design.js';
+import { defaultDesign, normalizeDesign, STARTERS, makeBridge, applyNeckPreset, unverifiedNeckKeys, neckBasis, neckHalfAt, seatedCorner, seatOnPocket, POCKET_SNAP, POCKET_LEVEL } from '../src/model/design.js';
 import { derive } from '../src/model/derive.js';
 import { buildLayers } from '../src/model/solid.js';
 import { buildBodyMesh, meshVolume } from '../src/model/mesh.js';
@@ -55,7 +55,23 @@ test('neck geometry: pocket, frets and screws land where the numbers say', () =>
   const g = derive(d, { tol: 0.01 });
   near(g.heelY, 647.7 - 466.98, 1e-9, 'pocket end to scale line');
   const pb = bbox(g.pocket);
-  near(pb.w, 55.5625, 0.01); near(pb.y0, 180.72, 1e-6);
+  near(pb.y0, 180.72, 1e-6);
+  // the pocket is a direct cutout of the neck: its sides are the fretboard's edges, a straight taper from the
+  // heel's width at the heel end toward the nut's width at the nut (worked out here from the neck's numbers)
+  const taper = (y) => (d.neck.nutWidth + ((d.neck.heelWidth - d.neck.nutWidth) * (g.nutY - y)) / d.neck.nutToHeel) / 2;
+  near(taper(g.heelY) * 2, 55.5625, 1e-9); near(taper(g.nutY) * 2, d.neck.nutWidth, 1e-9);
+  const walls = g.pocket.filter((p) => p.y > g.heelY + d.neck.heelCornerR + 0.01);
+  assert.ok(walls.length >= 4 && walls.every((p) => Math.abs(Math.abs(p.x) - taper(p.y)) < 1e-6), 'pocket sides are on the neck\'s taper');
+  assert.ok(g.pocket.every((p) => Math.abs(p.x) <= taper(p.y) + 1e-6), 'no part of the pocket is wider than the neck');
+  near(g.pocketMouthWidth, 2 * taper(g.heelY + d.neck.pocketLength), 1e-9, 'width where the neck leaves the pocket');
+  assert.ok(g.pocketMouthWidth < d.neck.heelWidth - 1, 'the pocket narrows toward the nut');
+  // and the fretboard drawn over it has the same edges
+  const fb = bbox(g.fretboard); near(fb.w, 2 * taper(g.boardEndY), 1e-6);
+  for (const p of g.fretboard) near(Math.abs(p.x), taper(p.y), 1e-6);
+  // a narrower nut narrows the pocket's far end and leaves the heel end alone
+  const slim = defaultDesign(); slim.neck = { ...slim.neck, nutWidth: slim.neck.nutWidth - 2, preset: 'custom' };
+  const gs = derive(slim, { tol: 0.01 });
+  assert.ok(gs.pocketMouthWidth < g.pocketMouthWidth - 0.2 && Math.abs(gs.neckHalf(gs.heelY) - g.neckHalf(g.heelY)) < 1e-9);
   assert.equal(g.frets.length, 22);
   near(g.nutY - g.frets[11].y, 647.7 / 2, 1e-9, '12th fret is half the scale');
   near(g.frets[21].y, 647.7 - fretDistance(647.7, 22), 1e-9);
@@ -68,8 +84,10 @@ test('neck geometry: pocket, frets and screws land where the numbers say', () =>
   near(g.strings[5].saddle.y, -0.03 * IN, 1e-9); near(g.strings[0].saddle.y, -0.09 * IN, 1e-9);
   near(g.saddleSpread, 5 * 0.43 * IN, 1e-9);
   // pocket corners carry the heel radius
+  // (the arc touches the end wall and the pocket's sloping side, so its center is 6.35 from both)
   let worst = 0;
-  for (const p of g.pocket) if (p.y < g.heelY + 6.35 && Math.abs(p.x) > 55.5625 / 2 - 6.35) worst = Math.max(worst, Math.abs(Math.hypot(Math.abs(p.x) - (55.5625 / 2 - 6.35), p.y - (g.heelY + 6.35)) - 6.35));
+  const slope = (taper(g.nutY) - taper(g.heelY)) / d.neck.nutToHeel, cy = g.heelY + 6.35, cx = taper(cy) - 6.35 * Math.hypot(1, slope);
+  for (const p of g.pocket) if (p.y < g.heelY + 6 && Math.abs(p.x) > cx + 0.5) worst = Math.max(worst, Math.abs(Math.hypot(Math.abs(p.x) - cx, p.y - cy) - 6.35));
   assert.ok(worst < 0.01, `pocket corner radius error ${worst}`);
 });
 
@@ -183,7 +201,7 @@ test('templates: bearing-guided openings equal the cavities, and the DXF reads b
   const cav = back.items.find((i) => i.layer === 'CUT_INSIDE' && !i.hole);
   assert.ok(bbox(cav.poly).cx < 0 && d.cavities[0].x > 0);
   assert.ok(top.legend.some((l) => /Neck pocket: 5\/8 in deep/.test(l)), top.legend.join(' | '));
-  assert.match(top.legend.join(' '), /CHECK before cutting: nut-to-heel length, heel corner radius, neck screw position, fretboard overhang/);
+  assert.match(top.legend.join(' '), /CHECK before cutting: nut-to-heel length, nut width, heel corner radius, neck screw position, fretboard overhang/);
   assert.equal(top.textHeight, 3.2, 'legend fits at full size on the starting design');
 
   // DXF round trip
@@ -203,10 +221,16 @@ test('templates: bearing-guided openings equal the cavities, and the DXF reads b
   // long straight edges survive untouched: the pocket walls are exactly one heel width apart, top to bottom
   const topOuter = closed.find((p) => p.layer === 'CUT_OUTSIDE');
   const walls = [];
-  topOuter.verts.forEach((a, i) => { const b = topOuter.verts[(i + 1) % topOuter.verts.length]; if (!a.bulge && Math.abs(a.y - b.y) > 40) walls.push([a.x, b.x]); });
+  topOuter.verts.forEach((a, i) => { const b = topOuter.verts[(i + 1) % topOuter.verts.length]; if (!a.bulge && Math.abs(a.y - b.y) > 40) walls.push([a, b]); });
   assert.equal(walls.length, 2);
-  assert.ok(walls.every(([x0, x1]) => Math.abs(x0 - x1) < 1e-9), 'pocket walls are exactly vertical');
-  near(Math.abs(walls[0][0] - walls[1][0]), d.neck.heelWidth, 2e-4, 'pocket width in the DXF');
+  // each wall is one straight line whose two ends sit on the neck's taper (the fretboard's edge)
+  // (sheet coordinates are shifted, so: each wall leans by the taper, toward the other wall going up the neck,
+  // and at their wide ends the walls are the pocket's width apart)
+  const lean = (d.neck.heelWidth - d.neck.nutWidth) / 2 / d.neck.nutToHeel;
+  const ends = walls.map(([a, b]) => (a.y < b.y ? [a, b] : [b, a]));
+  for (const [lo, hi] of ends) near(Math.abs((hi.x - lo.x) / (hi.y - lo.y)), lean, 1e-6, 'pocket wall lean in the DXF');
+  assert.ok(Math.abs(ends[0][1].x - ends[1][1].x) < Math.abs(ends[0][0].x - ends[1][0].x), 'narrower toward the nut');
+  near(Math.abs(ends[0][0].x - ends[1][0].x), bbox(g.pocket).w, 2e-3, 'pocket width in the DXF');
   assert.match(dxf, /\$INSUNITS\r\n70\r\n4/);
   // SVG
   const svg = toSVG(prep, { title: 'x' });
@@ -274,19 +298,19 @@ test('opened files are repaired to the current document shape', () => {
 
 test('neck numbers stay flagged until confirmed, and a confirmation lapses when the number changes', () => {
   let d = defaultDesign();
-  assert.deepEqual(unverifiedNeckKeys(d), ['nutToHeel', 'heelCornerR', 'screwFromHeelEnd', 'boardPastHeel']);
+  assert.deepEqual(unverifiedNeckKeys(d), ['nutToHeel', 'nutWidth', 'heelCornerR', 'screwFromHeelEnd', 'boardPastHeel']);
   d = { ...d, verified: { nutToHeel: d.neck.nutToHeel } };
   assert.ok(!unverifiedNeckKeys(d).includes('nutToHeel'));
   // the template stops engraving that CHECK note, and the checks stop asking
   const t = buildTemplates(d, derive(d));
-  assert.ok(!/nut-to-heel/.test(t.sheets[0].legend.join(' ')) && /CHECK before cutting: heel corner radius/.test(t.sheets[0].legend.join(' ')));
+  assert.ok(!/nut-to-heel/.test(t.sheets[0].legend.join(' ')) && /CHECK before cutting: nut width, heel corner radius/.test(t.sheets[0].legend.join(' ')));
   // switching to another standard that uses the same number keeps the confirmation...
   const tele = { ...d, neck: applyNeckPreset(d.neck, 'tele21') };
   assert.ok(!unverifiedNeckKeys(tele).includes('nutToHeel'));
   assert.ok(!unverifiedNeckKeys(tele).includes('heelCornerR'), 'the squared heel is published, so it is not asked for');
   // ...but editing one field must not silence the others: the neck becomes "custom" yet still knows its base
   const edited = { ...defaultDesign(), neck: { ...defaultDesign().neck, pocketDepth: 0.72 * IN, preset: 'custom' } };
-  assert.deepEqual(unverifiedNeckKeys(edited), ['nutToHeel', 'heelCornerR', 'screwFromHeelEnd', 'boardPastHeel']);
+  assert.deepEqual(unverifiedNeckKeys(edited), ['nutToHeel', 'nutWidth', 'heelCornerR', 'screwFromHeelEnd', 'boardPastHeel']);
   assert.equal(neckBasis(edited, 'pocketDepth'), null, 'a changed number is the user\u2019s own');
   assert.equal(neckBasis(edited, 'heelWidth')[0], 'published');
   // a number the user typed themselves is theirs and is not asked about
@@ -312,7 +336,8 @@ test('a separate neck pocket template keeps the full outline on top and gives th
   assert.equal(open.length, 1);
   const ob = bbox(open[0].poly), outer = pk.items.find((i) => i.layer === 'CUT_OUTSIDE').poly;
   near(ob.y0, g.heelY, 1e-6, 'opening starts at the pocket end wall');
-  near(ob.w, d.neck.heelWidth, 0.01, 'opening is the heel width');
+  near(ob.w, bbox(g.pocket).w, 0.01, 'opening is the pocket\'s width');
+  assert.ok(open[0].poly.filter((p) => p.y > g.heelY + d.neck.heelCornerR + 0.5).every((p) => Math.abs(Math.abs(p.x) - g.neckHalf(p.y)) < 0.01), 'its sides follow the neck\'s taper');
   near(ob.y1, g.mouthY + POCKET_SHEET.runout, 1e-6, 'opening runs past the body edge');
   for (const p of open[0].poly) assert.ok(pointInPoly(p, outer) && distToPoly(p, outer, true).d > POCKET_SHEET.rim - 0.5, 'opening is closed, with a rim all round');
   // every point of the body outline is on or inside the pocket template, so it can be lined up by its edges
@@ -322,7 +347,7 @@ test('a separate neck pocket template keeps the full outline on top and gives th
   const b = defaultDesign(); b.tooling.pocketSheet = 'own'; b.tooling.cavity = { mode: 'bushing', bit: IN / 4, bushing: (5 / 8) * IN };
   const gb = derive(b, { tol: 0.005 });
   const ob2 = bbox(buildTemplates(b, gb).sheets[1].items.find((i) => i.layer === 'CUT_INSIDE').poly);
-  near(ob2.w, b.neck.heelWidth + 2 * toolOffset(b.tooling.cavity), 0.01); near(ob2.y0, gb.heelY - toolOffset(b.tooling.cavity), 0.01);
+  near(ob2.w, bbox(gb.pocket).w + 2 * toolOffset(b.tooling.cavity), 0.01); near(ob2.y0, gb.heelY - toolOffset(b.tooling.cavity), 0.01);
 });
 
 test('alignment pin starting spots are clear of every hole and cavity, for every bridge', () => {
@@ -435,4 +460,79 @@ test('the legend steps its lettering down to fit a crowded sheet rather than bei
     }
   }
   assert.ok(t.sheets[0].legend.length >= 14);
+});
+
+test('the starting shape is the owner\u2019s outline, with its corners at the neck seated on the pocket\u2019s edges', () => {
+  const d = defaultDesign(), n = d.outline.nodes, g = derive(d, { tol: 0.005 });
+  assert.equal(n.length, 16);
+  assert.equal(d.outline.symmetric, false);
+  const a = n[0], b = n[n.length - 1];
+  assert.ok(a.k === 'c' && b.k === 'c' && a.x < 0 && b.x > 0, 'a corner each side of the neck');
+  // as he drew them the corners were at -28 and 26.93, 0.03 mm apart in height: seated, they are on the fretboard's edge and level
+  near(STARTERS.doublecut.outline.nodes[0].x, -28, 1e-9); near(STARTERS.doublecut.outline.nodes[15].x, 26.93, 1e-9); near(STARTERS.doublecut.outline.nodes[15].y, 255.97, 1e-9);
+  near(a.x, -g.neckHalf(a.y), 1e-9, 'bass corner on the pocket edge'); near(b.x, g.neckHalf(b.y), 1e-9, 'treble corner on the pocket edge');
+  assert.equal(a.y, b.y, 'level with each other');
+  // every other point is exactly as drawn
+  STARTERS.doublecut.outline.nodes.slice(1, 15).forEach((q, i) => assert.deepEqual(n[i + 1], q));
+  // the pocket's wall meets the body exactly at each corner: no sliver of wood beside the neck, no wall outside the body
+  for (const c of [a, b]) near(distToPoly(c, g.pocket, true).d, 0, 1e-6, 'corner on the pocket outline');
+  assert.ok(!runChecks(d, g).some((c) => /corner at the neck pocket/.test(c.title)), 'nothing to report about the corners');
+  assert.ok(!runChecks(d, g).some((c) => c.level === 'error'), 'the starting design has no errors');
+  // opening it again changes nothing
+  assert.deepEqual(normalizeDesign(JSON.parse(JSON.stringify(d))).outline, d.outline);
+});
+
+test('corners of the body beside the pocket seat on the fretboard\u2019s edge; other points are left alone', () => {
+  const neck = defaultDesign().neck, heelY = neck.scale - neck.nutToHeel, y = heelY + neck.pocketLength, half = neckHalfAt(neck, y);
+  near(neckHalfAt(neck, heelY) * 2, neck.heelWidth, 1e-9); near(neckHalfAt(neck, neck.scale) * 2, neck.nutWidth, 1e-9);
+  const corner = (x, yy = y, k = 'c') => ({ x, y: yy, ix: 0, iy: 0, ox: 0, oy: 0, k });
+  near(seatedCorner(corner(half + 2), neck).x, half, 1e-9, 'a corner 2 mm outside comes in');
+  near(seatedCorner(corner(-half + 2.9), neck).x, -half, 1e-9, 'a corner 2.9 mm inside on the bass side goes out');
+  assert.equal(seatedCorner(corner(half + POCKET_SNAP + 0.1), neck), null, 'beyond the snap distance it is left alone');
+  assert.equal(seatedCorner(corner(half + 1, y, 's'), neck), null, 'a smooth point is never moved');
+  assert.equal(seatedCorner(corner(half, heelY + 2), neck), null, 'nor a corner down at the heel end');
+  assert.equal(seatedCorner(corner(half, y + 40), neck), null, 'nor one well up the neck');
+  assert.equal(seatedCorner(corner(0.5, y), neck), null, 'nor one on the centerline');
+  // the taper is followed at whatever height the corner is
+  const up = seatedCorner(corner(half, y + 10), neck); near(up.x, neckHalfAt(neck, y + 10), 1e-9); assert.ok(up.x < half);
+  // two corners nearly level are made level; clearly apart, each keeps its height
+  const mate = corner(-half, y);
+  assert.equal(seatedCorner(corner(half + 1, y + POCKET_LEVEL - 0.1), neck, [mate]).y, y);
+  assert.equal(seatedCorner(corner(half + 1, y + POCKET_LEVEL + 0.5), neck, [mate]).y, y + POCKET_LEVEL + 0.5);
+  // a whole outline: only the corners move, and a mirrored outline is not touched
+  const d = defaultDesign(), loose = JSON.parse(JSON.stringify(d.outline));
+  loose.nodes[0].x -= 1.2; loose.nodes[15].x += 0.4; loose.nodes[15].y -= 0.2;
+  const seated = seatOnPocket(loose, d.neck);
+  assert.deepEqual(seated.nodes, d.outline.nodes);
+  assert.equal(seatOnPocket(d.outline, d.neck), d.outline, 'already seated: the same object back');
+  const mirrored = normalizeDesign({ ...d, outline: STARTERS.blank ? JSON.parse(JSON.stringify(d.outline)) : d.outline }).outline; mirrored.symmetric = true;
+  assert.equal(seatOnPocket(mirrored, d.neck), mirrored);
+  // a narrower heel: the corners follow the pocket in
+  const slim = { ...d.neck, heelWidth: d.neck.heelWidth - 2, preset: 'custom' }, moved = seatOnPocket(d.outline, slim);
+  near(moved.nodes[0].x, -neckHalfAt(slim, moved.nodes[0].y), 1e-9); near(moved.nodes[15].x, neckHalfAt(slim, moved.nodes[15].y), 1e-9);
+  assert.ok(Math.abs(moved.nodes[0].x) < Math.abs(d.outline.nodes[0].x) - 0.5);
+  // a corner too far off to be seated is reported, in plain words, at the corner
+  const off = JSON.parse(JSON.stringify(d)); off.outline.nodes[0].x -= 5;
+  const found = runChecks(off, derive(off, { tol: 0.005 })).filter((c) => /corner at the neck pocket/.test(c.title));
+  assert.equal(found.length, 1);
+  assert.match(found[0].title, /outside the pocket\u2019s edge/); assert.equal(found[0].level, 'warn');
+  // T-style and J-style: whatever corners they have beside the pocket end up on it
+  for (const key of ['tstyle', 'jstyle']) {
+    const o = seatOnPocket(JSON.parse(JSON.stringify(STARTERS[key].outline)), d.neck);
+    const nodes = normalizeDesign({ ...d, outline: o }).outline.nodes;
+    for (const q of nodes) if (q.k === 'c' && q.y > heelY + 5 && q.y < y + 25 && Math.abs(Math.abs(q.x) - neckHalfAt(d.neck, q.y)) <= POCKET_SNAP) near(Math.abs(q.x), neckHalfAt(d.neck, q.y), 1e-9, key);
+  }
+});
+
+test('nut width is on the measure-before-you-cut list, because it now sets the pocket\u2019s taper', () => {
+  const d = defaultDesign();
+  assert.ok(unverifiedNeckKeys(d).includes('nutWidth'));
+  const t = buildTemplates(d, derive(d));
+  assert.match(t.sheets[0].legend.join(' '), /nut width/);
+  const ok = { ...d, verified: { nutWidth: d.neck.nutWidth } };
+  assert.ok(!unverifiedNeckKeys(ok).includes('nutWidth'));
+  assert.ok(!('mouthWidth' in d.neck), 'the separate mouth width is gone: the pocket has no width of its own');
+  // an older file that still carries one opens, and its pocket follows the neck all the same
+  const old = normalizeDesign({ ...JSON.parse(JSON.stringify(d)), neck: { ...d.neck, mouthWidth: 60 } });
+  near(derive(old, { tol: 0.01 }).pocketMouthWidth, derive(d, { tol: 0.01 }).pocketMouthWidth, 1e-9);
 });

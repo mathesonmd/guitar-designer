@@ -3,7 +3,7 @@
 // Each finding: { level: 'warn' | 'note' | 'ok', title, detail, at?: {x, y}, ref? }
 import { offset, opening, closing, difference, regionArea, loops, largestOuter } from '../core/clip.js';
 import { pointInPoly, minDistPolys, distToPoly, bbox } from '../core/poly.js';
-import { unverifiedNeckKeys, neckBasis } from './design.js';
+import { unverifiedNeckKeys, neckBasis, neckHalfAt, POCKET_SNAP } from './design.js';
 import { fmtWithUnit } from '../core/units.js';
 
 // The outline a router actually produces for a given template setup.
@@ -213,6 +213,19 @@ export function runChecks(design, g, solid) {
     out.push({ level: 'note', ref: 'pocket', title: 'The neck pocket template has no alignment pins', detail: 'It can be lined up by the engraved centerline and the engraved body edge. For a positive fit, turn on alignment pin holes under Routing setup.' });
   }
 
+  /* ---- the body's corners at the neck pocket ---- */
+  if (!design.outline.symmetric) {
+    const heelY0 = nk.scale - nk.nutToHeel;
+    for (const n of design.outline.nodes) {
+      if (n.k !== 'c' || n.y < heelY0 + 5 || n.y > heelY0 + nk.pocketLength + 25 || Math.abs(n.x) < 1) continue;
+      const off = Math.abs(n.x) - neckHalfAt(nk, n.y);
+      if (Math.abs(off) > 0.05 && Math.abs(off) <= POCKET_SNAP + 5) {
+        out.push({ level: 'warn', at: { x: n.x, y: n.y }, ref: 'outline', title: `The body’s corner at the neck pocket is ${L(Math.abs(off))} ${off > 0 ? 'outside' : 'inside'} the pocket’s edge`,
+          detail: off > 0 ? 'That leaves a thin sliver of wood beside the neck. Drag the corner toward the pocket: it snaps onto the edge.' : 'The pocket’s wall runs outside the body there. Drag the corner toward the pocket: it snaps onto the edge.' });
+      }
+    }
+  }
+
   /* ---- tuner holes ---- */
   const tuners = g.neck && g.neck.head ? g.neck.head.tuners : [];
   if (tuners.length) {
@@ -231,5 +244,5 @@ export function runChecks(design, g, solid) {
   return out;
 }
 
-const LABELS = { nutToHeel: 'nut to end of heel', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'first neck screw row from the heel end', boardPastHeel: 'fretboard overhang past the heel' };
+const LABELS = { nutToHeel: 'nut to end of heel', nutWidth: 'nut width', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'first neck screw row from the heel end', boardPastHeel: 'fretboard overhang past the heel' };
 const labelFor = (k) => LABELS[k] || k;

@@ -1,4 +1,5 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
+import { seatedCorner } from '../model/design.js';
 import { expandOutline, nodesToSvgPath, nearestOnNodes, insertNode, removeNode, setHandle, setKind, storedIndex } from '../core/path.js';
 import { fmtLen, unitLabel } from '../core/units.js';
 import { useSize } from './widgets.jsx';
@@ -138,7 +139,9 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
         const n = { ...d.n0, x: d.n0.x + dx, y: d.n0.y + dy };
         if (sym) { if (d.i === 0 || d.i === ns.length - 1) n.x = 0; else n.x = Math.min(n.x, -0.5); }
         if (open) n.y = Math.max(n.y, lift + 1);
-        ns[d.i] = down(n);
+        // a corner of the body dragged near the neck pocket snaps onto the pocket's edge, which is the fretboard's edge
+        const seat = !open && !sym ? seatedCorner(n, ds.neck, ns.filter((q, j) => j !== d.i)) : null; // (and level with the corner across the pocket when it nearly is)
+        ns[d.i] = down(seat || n);
         return store(ds, ns);
       }, T);
     } else if (d.kind === 'hin' || d.kind === 'hout') {

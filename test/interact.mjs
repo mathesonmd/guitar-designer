@@ -101,6 +101,26 @@ await step('clicking the outline shows its points; dragging a point reshapes it;
   return `point moved ${(d1.outline.nodes[7].y - n7.y).toFixed(1)} mm and back`;
 });
 
+await step('a corner of the body dragged near the neck pocket snaps onto the fretboard\u2019s edge; dragged well away it stays put', async () => {
+  const d0 = await state(), nk = d0.neck, c = d0.outline.nodes[0];
+  const half = (y) => (nk.nutWidth + ((nk.heelWidth - nk.nutWidth) * (nk.scale - y)) / nk.nutToHeel) / 2;
+  near(c.x, -half(c.y), 1e-6, 'the starting corner is on the pocket edge');
+  const p = await toScreen(d0.outline.nodes[7].x, d0.outline.nodes[7].y);
+  await page.mouse.click(p.x, p.y); // select the outline so its points show
+  await dragWorld(c, { x: c.x - 1.6, y: c.y + 7 });
+  const d1 = await state(), c1 = d1.outline.nodes[0];
+  near(c1.y, c.y + 7, 0.8, 'the corner went up with the pointer');
+  near(c1.x, -half(c1.y), 1e-6, 'and sat on the pocket edge at that height');
+  assert(Math.abs(c1.x - (c.x - 1.6)) > 0.5, 'it did not stay where the pointer left it');
+  await dragWorld(c1, { x: c1.x - 12, y: c1.y });
+  const d2 = await state();
+  near(d2.outline.nodes[0].x, c1.x - 12, 0.8, 'well away from the pocket it is left where it was put');
+  const warned = await page.evaluate(() => document.body.innerText.includes('corner at the neck pocket'));
+  await page.click('button[aria-label="Undo"]'); await page.click('button[aria-label="Undo"]');
+  near((await state()).outline.nodes[0].x, c.x, 1e-6, 'undo twice restores the corner');
+  return `snapped to ${c1.x.toFixed(2)} at y ${c1.y.toFixed(1)}; 12 mm away it stays${warned ? ' (and the build check names it)' : ''}`;
+});
+
 await step('double-click adds a point without changing the shape; Delete removes it; Smooth and Corner switch', async () => {
   const d0 = await state();
   const area0 = await page.evaluate(() => document.querySelector('section[data-sec="shape"] .hint').innerText);
@@ -287,17 +307,17 @@ await step('choosing a squared-heel neck warns that the pocket corners will not 
 
 await step('confirming a measurement removes it from the list and from the template CHECK notes', async () => {
   const before = (await findings()).filter((x) => /Measure before you cut/.test(x.title)).length;
-  assert(before === 4, 'four numbers to confirm, saw ' + before);
+  assert(before === 5, 'five numbers to confirm (nut width is one: it sets the pocket\u2019s taper), saw ' + before);
   await page.locator('.rail .find:has-text("nut to end of heel") input[type=checkbox]').click();
   await settle(700);
   const d = await state();
   near(d.verified.nutToHeel, 466.98, 1e-6, 'stored the confirmed value');
-  assert((await findings()).filter((x) => /Measure before you cut/.test(x.title)).length === 3, 'three left');
+  assert((await findings()).filter((x) => /Measure before you cut/.test(x.title)).length === 4, 'four left');
   await setField('#nk-nutToHeel', '18.4');
   await setField('#nk-nutToHeel', '18.385');
   await page.click('button[aria-label="Undo"]'); await page.click('button[aria-label="Undo"]'); await page.click('button[aria-label="Undo"]');
   await settle(700);
-  assert((await findings()).filter((x) => /Measure before you cut/.test(x.title)).length === 4, 'undo brings the item back');
+  assert((await findings()).filter((x) => /Measure before you cut/.test(x.title)).length === 5, 'undo brings the item back');
   assert((await state()).neck.preset === 'fender22', 'neck is the standard again');
 });
 

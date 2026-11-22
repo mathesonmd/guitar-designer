@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { LOGO } from '../assets/logo.js';
-import { defaultDesign, normalizeDesign, STARTERS, newId, SCHEMA } from '../model/design.js';
+import { defaultDesign, normalizeDesign, STARTERS, newId, SCHEMA, seatOnPocket } from '../model/design.js';
 import { derive } from '../model/derive.js';
 import { buildLayers } from '../model/solid.js';
 import { runChecks } from '../model/checks.js';
@@ -233,7 +233,7 @@ export default function App() {
               const xs = nodes.map((n) => n.x), ys = nodes.map((n) => n.y);
               const x0 = Math.min(...xs) - 12, x1 = Math.max(...xs) + 12, y0 = Math.min(...ys) - 12, y1 = Math.max(...ys) + 12;
               return (
-                <button key={key} className="starter" onClick={() => { change((d) => ({ ...d, outline: JSON.parse(JSON.stringify(s.outline)) })); setDialog(null); setSel({ kind: 'outline' }); setViewCmd({ type: 'fit', n: Date.now() }); }}>
+                <button key={key} className="starter" onClick={() => { change((d) => ({ ...d, outline: seatOnPocket(JSON.parse(JSON.stringify(s.outline)), d.neck) })); setDialog(null); setSel({ kind: 'outline' }); setViewCmd({ type: 'fit', n: Date.now() }); }}>
                   <svg viewBox={`${x0} ${-y1} ${x1 - x0} ${y1 - y0}`} aria-hidden="true"><g transform="scale(1,-1)"><path d={nodesToSvgPath(nodes, true)} fill="var(--anvil)" stroke="var(--bone)" strokeWidth="2" vectorEffect="non-scaling-stroke" /></g></svg>
                   <b>{s.label}</b><span>{s.note}</span>
                 </button>

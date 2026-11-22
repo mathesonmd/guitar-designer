@@ -219,7 +219,7 @@ const holeItem = (x, y, r, flip) => {
   return { type: 'cut', layer: 'CUT_INSIDE', poly: circlePoly(cx, y, r, 0.003), hole: true, circle: { x: cx, y, r } };
 };
 
-const CHECK_TEXT = { nutToHeel: 'nut-to-heel length', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'neck screw position', boardPastHeel: 'fretboard overhang' };
+const CHECK_TEXT = { nutToHeel: 'nut-to-heel length', nutWidth: 'nut width', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'neck screw position', boardPastHeel: 'fretboard overhang' };
 
 // Wood between a point and the nearest hole edge, cavity edge or body edge (0 when it sits in or on one).
 export function clearanceAt(p, g) {

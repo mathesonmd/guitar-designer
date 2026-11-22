@@ -23,7 +23,9 @@ export function derive(design, { tol = 0.02 } = {}) {
   // neck width: straight taper from the nut to the heel end
   const neckHalf = (y) => (nk.nutWidth + (nk.heelWidth - nk.nutWidth) * ((nutY - y) / (nutY - heelY))) / 2;
   // pocket width: heel width at the end wall, mouth width one pocket-length up
-  const pocketHalf = (y) => (nk.heelWidth + (nk.mouthWidth - nk.heelWidth) * ((y - heelY) / nk.pocketLength)) / 2;
+  // The pocket's sides are the fretboard's edges (the owner's rule, 22 November 2026): the pocket is a direct
+  // cutout of the neck that sits in it, as wide as the heel at its end and narrowing with the neck's taper.
+  const pocketHalf = neckHalf;
 
   // The pocket outline from its end wall up to any height (it has to run past the body edge to be open).
   const pocketTo = (topY) => filletPoly([
@@ -140,7 +142,7 @@ export function derive(design, { tol = 0.02 } = {}) {
   const area = Math.abs(signedArea(outline));
   const out = {
     outline, bbox: ob, area, centroid: centroid(outline),
-    scale, nutY, heelY, boardEndY, neckHalf, pocketHalf,
+    scale, nutY, heelY, boardEndY, neckHalf, pocketHalf, pocketMouthWidth: 2 * neckHalf(heelY + nk.pocketLength),
     pocket, pocketTo, mouthY, fretboard, frets, strings, stringXAt, saddleSpread,
     bridge, bridgeDef: bdef, pickups, cavities, cuts, holes, binding, bevelEdge, purfling,
     join: { treble: joinFret(1), bass: joinFret(-1) },

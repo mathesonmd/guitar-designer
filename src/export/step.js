@@ -9,6 +9,7 @@
 import { expandOutline, segmentsOf } from '../core/path.js';
 import { fitArcs } from '../core/arcfit.js';
 import { signedArea, centroid } from '../core/poly.js';
+import { EdgeIndex } from '../core/edgeindex.js';
 import { bevelPlane, bellyDish } from '../model/solid.js';
 import { edgeRounds } from '../model/design.js';
 import { HOLE_DEPTH_GROUPS } from '../data/bridges.js';
@@ -148,6 +149,38 @@ function cutAll(rc, oc, body, tools) {
   return out;
 }
 
+// The neck pocket's cutter. The pocket's sides are the fretboard's edges, and a body is often drawn to them:
+// a corner of the body sits on the pocket's side, or (on a T-style) the body's own edge runs along it. A
+// cutter wall lying on the body's edge is the kind of cut the engine gets wrong: it handed back a T-style
+// body with no pocket at all, and no error. So each side of the cutter follows the pocket only as far as
+// there is wood beside it: from the point where the body's edge comes within GRAZE of the side (or the side
+// leaves the body), the cutter steps 1 mm outward and runs clear of the edge. Wood thinner than GRAZE
+// beside the neck is not left standing in the file. The 2D vectors and templates keep the pocket as drawn.
+const GRAZE = 0.1;
+function clearOfEdge(poly, outline) {
+  const n = poly.length;
+  if (n < 5) return poly;
+  const idx = new EdgeIndex(outline, 8);
+  const inside = (p) => { let c = false; for (let i = 0, j = outline.length - 1; i < outline.length; j = i++) { const a = outline[i], b = outline[j]; if ((a.y > p.y) !== (b.y > p.y) && p.x < ((b.x - a.x) * (p.y - a.y)) / (b.y - a.y) + a.x) c = !c; } return c; };
+  // the last two points are the open end; the walls run to them from the points before and after
+  const side = (from, to) => {
+    const len = Math.hypot(to.x - from.x, to.y - from.y), steps = Math.max(1, Math.ceil(len / 0.25));
+    let seenWood = false;
+    for (let i = 0; i <= steps; i++) {
+      const p = { x: from.x + ((to.x - from.x) * i) / steps, y: from.y + ((to.y - from.y) * i) / steps };
+      const wood = inside(p) && idx.nearest(p.x, p.y).d > GRAZE;
+      if (wood) seenWood = true;
+      else if (seenWood || i > 0) return p;
+    }
+    return null;
+  };
+  const right = side(poly[n - 3], poly[n - 2]), left = side(poly[0], poly[n - 1]);
+  const top = poly[n - 2].y, out = poly.slice(0, n - 2);
+  if (right) out.push(right, { x: right.x + 1, y: right.y }, { x: right.x + 1, y: top }); else out.push(poly[n - 2]);
+  if (left) out.push({ x: left.x - 1, y: top }, { x: left.x - 1, y: left.y }, left); else out.push(poly[n - 1]);
+  return out;
+}
+
 // The body as a CAD solid. `expectVolume` is the volume the sliced solid gives for the same body: the
 // engine can return a wrong solid with no error at all, and comparing volumes is how that is caught.
 //   - If a rolled edge bevel is the cause, the bevel is rebuilt from flat strips (`bevelStrips` in the
@@ -189,12 +222,30 @@ function buildOnce(rc, oc, design, g, { roundovers = true, pockets = true, smoot
   const rT = roundovers ? rounds.top : 0, rB = roundovers ? rounds.back : 0;
 
   let body = prism(drawOutline(rc, design.outline), 0, T);
+  // The outline's straight edges that end in a sharp corner at both ends (the body's edge across the neck
+  // pocket is the usual one) are left square, and the rest is rolled. The engine cannot be trusted to roll
+  // a roundover along such an edge: on some outlines it returned a flawed face there, on others a face it
+  // called valid that could not be meshed and left a hole in the STL, depending on fractions of a
+  // millimeter in where the corners sat. The result says so (`squareEdges`) and the save dialog repeats it.
+  const segs = segmentsOf(expandOutline(design.outline), true).filter((s) => Math.hypot(s.p3.x - s.p0.x, s.p3.y - s.p0.y) > EPS
+    || Math.hypot(s.p1.x - s.p0.x, s.p1.y - s.p0.y) > EPS || Math.hypot(s.p2.x - s.p3.x, s.p2.y - s.p3.y) > EPS);
+  const isLine = (s) => Math.hypot(s.p1.x - s.p0.x, s.p1.y - s.p0.y) < EPS && Math.hypot(s.p2.x - s.p3.x, s.p2.y - s.p3.y) < EPS;
+  const unit = (x, y) => { const l = Math.hypot(x, y) || 1; return [x / l, y / l]; };
+  const leaves = (s) => (isLine(s) ? unit(s.p3.x - s.p0.x, s.p3.y - s.p0.y) : Math.hypot(s.p1.x - s.p0.x, s.p1.y - s.p0.y) > EPS ? unit(s.p1.x - s.p0.x, s.p1.y - s.p0.y) : unit(s.p2.x - s.p0.x, s.p2.y - s.p0.y));
+  const arrives = (s) => (isLine(s) ? unit(s.p3.x - s.p0.x, s.p3.y - s.p0.y) : Math.hypot(s.p3.x - s.p2.x, s.p3.y - s.p2.y) > EPS ? unit(s.p3.x - s.p2.x, s.p3.y - s.p2.y) : unit(s.p3.x - s.p1.x, s.p3.y - s.p1.y));
+  const turns = (a, b) => Math.abs(a[0] * b[1] - a[1] * b[0]) > 0.02 || a[0] * b[0] + a[1] * b[1] < 0;
+  const flats = segs.filter((s, i) => isLine(s) && turns(arrives(segs[(i + segs.length - 1) % segs.length]), leaves(s)) && turns(arrives(s), leaves(segs[(i + 1) % segs.length])));
+  const at = (p, q) => Math.hypot(p.x - q.x, p.y - q.y) < 1e-3;
+  const onFlat = (e) => flats.some((s) => (at(e.startPoint, s.p0) && at(e.endPoint, s.p3)) || (at(e.startPoint, s.p3) && at(e.endPoint, s.p0)));
+  let squareEdges = false;
   // Roll one loop of the slab's edges at a time: all the level edges at height z.
   const roll = (r, z) => {
     if (r <= 0.05) return;
     const radius = (e) => {
       const z0 = e.startPoint.z, z1 = e.endPoint.z;
-      return Math.abs(z0 - z) < 1e-4 && Math.abs(z1 - z) < 1e-4 ? r : null;
+      if (!(Math.abs(z0 - z) < 1e-4 && Math.abs(z1 - z) < 1e-4)) return null;
+      if (onFlat(e)) { squareEdges = true; return null; }
+      return r;
     };
     try {
       const next = body.fillet(radius);
@@ -263,14 +314,19 @@ function buildOnce(rc, oc, design, g, { roundovers = true, pockets = true, smoot
     const b = g.bbox, m = 20, zf = T - g.binding.depth;
     let ring = prism(rc.drawRoundedRectangle(b.w + 2 * m, b.h + 2 * m).translate(b.x0 + b.w / 2, b.y0 + b.h / 2), zf, T + PAST);
     for (const inner of g.binding.inner) ring = ring.cut(prism(drawVerts(rc, fitArcs(inner, 0.01, true)), zf - PAST, T + 2 * PAST));
-    tools.push(ring);
+    // In two pieces that overlap by a millimeter, not as one closed ring: the engine has handed the body
+    // back uncut, with no error, for a whole ring (a 2 mm channel on one outline, where 1.9 and 2.01 mm
+    // cut cleanly), and cut the same ring correctly in pieces.
+    const half = (x0, x1) => ring.intersect(prism(rc.drawRectangle(x1 - x0, b.h + 4 * m).translate((x0 + x1) / 2, b.y0 + b.h / 2), zf - 2 * PAST, T + 3 * PAST));
+    const split = b.x0 + b.w * 0.53;
+    tools.push(half(b.x0 - 2 * m, split + 0.5), half(split - 0.5, b.x1 + 2 * m));
   }
 
   for (const c of pockets ? g.cuts : []) {
     const d = Math.min(c.depth, T);
     if (!(d > 0)) continue;
     const through = d >= T - EPS;
-    const shape = drawVerts(rc, fitArcs(c.poly, 0.01, true));
+    const shape = drawVerts(rc, fitArcs(c.id === 'pocket' && c.open ? clearOfEdge(c.poly, g.outline) : c.poly, 0.01, true));
     tools.push(through ? prism(shape, -PAST, T + PAST)
       : c.side === 'back' ? prism(shape, -PAST, d) : prism(shape, T - d, T + PAST));
   }
@@ -290,7 +346,7 @@ function buildOnce(rc, oc, design, g, { roundovers = true, pockets = true, smoot
   const valid = checker.IsValid();
   checker.delete();
   if (!valid) throw new Error('The 3D model came out with a flaw the engine could not repair, so it was not saved. Try leaving the edge roundovers out of the model.');
-  return { shape: body, volume: rc.measureVolume(body), valid, leftOut: pockets ? holesLeftOut(g) : [], roundTop: rT, roundBack: rB };
+  return { shape: body, volume: rc.measureVolume(body), valid, leftOut: pockets ? holesLeftOut(g) : [], roundTop: rT, roundBack: rB, ...(squareEdges ? { squareEdges: true } : {}) };
 }
 
 // The STEP file as text. Units are millimeters; z = 0 is the back face.

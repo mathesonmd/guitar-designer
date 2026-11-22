@@ -5,7 +5,7 @@ import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
 import { TUNER_START, TUNER_LAYOUTS } from '../data/neckprofiles.js';
-import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack, makeHeadstock, makeSideLine, makeTongueLine } from '../model/design.js';
+import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack, makeHeadstock, makeSideLine, makeTongueLine, seatOnPocket } from '../model/design.js';
 import { NECK_PROFILES, NECK_PROFILE_BASIS } from '../data/neckprofiles.js';
 import { setSymmetric, storedIndex } from '../core/path.js';
 import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
@@ -23,7 +23,8 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
   const delItem = (key, id) => { change((d) => ({ ...d, [key]: d[key].filter((q) => q.id !== id) })); setSel(null); };
   const nk = design.neck, preset = NECK_PRESETS[nk.preset] || NECK_PRESETS.custom;
   const verified = design.verified || {};
-  const setNeck = (k, v) => change((d) => ({ ...d, neck: { ...d.neck, [k]: v } }));
+  // (a change to the neck can move the pocket's edges: the body's corners at the pocket go with them)
+  const setNeck = (k, v) => change((d) => { const neck = { ...d.neck, [k]: v }; return { ...d, neck, outline: seatOnPocket(d.outline, neck) }; });
   const bdef = BRIDGES[design.bridge.type];
   const tool = design.tooling;
   const setTool = (which, patch) => change((d) => ({ ...d, tooling: { ...d.tooling, [which]: { ...d.tooling[which], ...patch } } }));
@@ -106,7 +107,7 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
 
       <Acc id="neck" title="Neck" hint={`${fmtLen(nk.scale, u)} ${unitLabel(u)} scale`} defaultOpen>
         <Row label="Neck standard" wide htmlFor="neck-preset">
-          <select id="neck-preset" value={nk.preset} onChange={(e) => change((d) => ({ ...d, neck: applyNeckPreset(d.neck, e.target.value) }))}>
+          <select id="neck-preset" value={nk.preset} onChange={(e) => change((d) => { const neck = applyNeckPreset(d.neck, e.target.value); return { ...d, neck, outline: seatOnPocket(d.outline, neck) }; })}>
             {Object.entries(NECK_PRESETS).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
           </select>
         </Row>
@@ -118,7 +119,7 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
               : <Len id={`nk-${key}`} units={u} value={nk[key]} min={0} max={1200} onChange={(v) => change((d) => ({ ...d, neck: { ...d.neck, [key]: v, preset: preset.values[key] !== undefined && Math.abs(preset.values[key] - v) > 1e-6 ? 'custom' : d.neck.preset } }))} />}
           </Row>
         ))}
-        <p className="note">Pocket end to scale line: <b className="mono">{fmtWithUnit(g.heelY, u)}</b>. The pocket is cut to the heel’s width and corner radius.</p>
+        <p className="note">Pocket end to scale line: <b className="mono">{fmtWithUnit(g.heelY, u)}</b>. The pocket is a direct cutout of the neck: its sides are the fretboard’s edges. It is <b className="mono">{fmtWithUnit(nk.heelWidth, u)}</b> wide at the end of the heel and <b className="mono">{fmtWithUnit(g.pocketMouthWidth, u)}</b> wide {fmtWithUnit(nk.pocketLength, u)} up from there, following the taper from the nut’s width to the heel’s. The body’s corners at the pocket snap to its edges.</p>
         {(() => {
           const b = nk.back, made = g.neck;
           const setBack = (patch) => change((d) => ({ ...d, neck: { ...d.neck, back: { ...d.neck.back, ...patch } } }));

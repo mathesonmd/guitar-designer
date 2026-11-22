@@ -131,14 +131,27 @@ def vertical_runs(e):
     n = len(e)
     for i in range(n):
         a, b = e[i], e[(i + 1) % n]
-        if abs(a[0] - b[0]) < 0.006 and abs(a[1] - b[1]) > 30: runs.append(((a[0] + b[0]) / 2, abs(a[1] - b[1]), abs(a[0] - b[0])))
+        if abs(a[0] - b[0]) < 1.5 and abs(a[1] - b[1]) > 30:
+            lo, hi = (a, b) if a[1] < b[1] else (b, a)
+            runs.append((lo, hi))
     return runs
+# The pocket is a direct cutout of the neck: each wall is one straight line that leans by the neck's taper
+# (worked out here from the neck's own numbers), and at their wide ends, where the heel's rounded corners
+# begin, the walls are as far apart as the neck is wide there.
+lean = (nk['heelWidth'] - nk['nutWidth']) / 2 / nk['nutToHeel']
+def taper_half(y): return (nk['nutWidth'] + (nk['heelWidth'] - nk['nutWidth']) * (nk['scale'] - y) / nk['nutToHeel']) / 2
+pocket_R = nk['heelCornerR']; heel_y = nk['scale'] - nk['nutToHeel']
+pocket_cx = taper_half(heel_y + pocket_R) - pocket_R * math.hypot(1, lean)   # center of a heel corner arc: R from the end wall and from the leaning side
+wide = 2 * (pocket_cx + pocket_R / math.hypot(1, lean))                      # across the pocket where the arcs meet the sides
 found = None
 for e in outs:
     r = vertical_runs(e)
     if len(r) >= 2:
-        xs = sorted(x for x, _, _ in r); found = (xs[-1] - xs[0], max(l for _, _, l in r))
-check(found is not None and abs(found[0] - nk['heelWidth']) < 0.006, 'pocket notch walls are %.4f mm apart (heel width %.4f), each straight to within %.4f mm' % (found[0] if found else -1, nk['heelWidth'], found[1] if found else -1))
+        r = sorted(r, key=lambda w: w[0][0]); L, Rr = r[0], r[-1]
+        leans = [(w[1][0] - w[0][0]) / (w[1][1] - w[0][1]) for w in (L, Rr)]
+        found = (Rr[0][0] - L[0][0], Rr[1][0] - L[1][0], leans)
+check(found is not None and abs(found[0] - wide) < 0.02 and abs(found[2][0] - lean) < 2e-5 and abs(found[2][1] + lean) < 2e-5 and found[1] < found[0],
+      'pocket notch walls follow the neck\'s taper: %.4f mm apart at the heel corners (the neck there is %.4f), each leaning %.5f toward the other per mm (the neck\'s taper is %.5f)' % (found[0] if found else -1, wide, abs(found[2][0]) if found else -1, lean))
 # body size from the outline
 b = bbox(outs[0]); print('  template outline size: %.2f x %.2f mm (%.3f x %.3f in)' % (b[2] - b[0], b[3] - b[1], (b[2] - b[0]) / IN, (b[3] - b[1]) / IN))
 # scale bars: horizontal open strokes exactly 100 mm and 50.8 mm long
@@ -246,8 +259,9 @@ def step_report(path, rolled):
     screws = [(sx, sy) for sy in (s0, s0 + nk['screwAlong']) for sx in (-sa, sa)]
     check(all(has_cyl(x, y, nk['screwBodyHole'] / 2) for x, y in screws), 'four neck screw holes are true cylinders, %.2f mm across, where the neck numbers put them' % nk['screwBodyHole'])
     check(all(has_cyl(c['x'], c['y'], c['d'] / 2) for c in design['controls']), '%d control holes are true cylinders at their places and sizes' % len(design['controls']))
-    R = nk['heelCornerR']; hw = nk['heelWidth'] / 2
-    if R > 0.05: check(has_cyl(-(hw - R), heel + R, R) and has_cyl(hw - R, heel + R, R), 'neck pocket corners are true %.3f mm arcs, one heel width (%.3f mm) apart' % (R, 2 * hw))
+    R = nk['heelCornerR']; k = (nk['heelWidth'] - nk['nutWidth']) / 2 / nk['nutToHeel']
+    cx = (nk['nutWidth'] + (nk['heelWidth'] - nk['nutWidth']) * (nk['scale'] - (heel + R)) / nk['nutToHeel']) / 2 - R * math.hypot(1, k)
+    if R > 0.05: check(has_cyl(-cx, heel + R, R) and has_cyl(cx, heel + R, R), 'neck pocket corners are true %.3f mm arcs that touch the end wall and the pocket\'s tapered sides (centers %.3f mm apart)' % (R, 2 * cx))
     floors = []
     for k, a in E.values():
         if k == 'PLANE':
@@ -256,8 +270,7 @@ def step_report(path, rolled):
     want = [('neck pocket', T - nk['pocketDepth'])] + [('pickup cavity', T - p['depth']) for p in design['pickups']] + [(c['name'], c['depth'] if c['side'] == 'back' else T - c['depth']) for c in design['cavities']]
     miss = [n for n, zf in want if not any(abs(f - zf) < 1e-6 for f in floors)]
     check(not miss, 'a flat, level floor at the stated depth of every pocket (%d pockets)%s' % (len(want), '' if not miss else ': missing ' + ', '.join(miss)))
-    curved = kinds.get('B_SPLINE_SURFACE_WITH_KNOTS', 0) + kinds.get('TOROIDAL_SURFACE', 0)
-    return curved
+    return kinds.get('ADVANCED_FACE', 0)
 steps = sorted(f for f in glob.glob(D + '/*-body-*.step') if 'nopockets' not in f and 'smooth' not in f)
 for f in glob.glob(D + '/*-body-nopockets.step'):
     bare = parse_step(open(f).read()); bk = [k for k, _ in bare.values()]
@@ -270,7 +283,9 @@ for f in glob.glob(D + '/*-body-nopockets.step'):
 if not steps: print('  skip STEP checks: no 3D model was saved')
 else:
     curved = {('rolled' if 'rolled' in f else 'square'): step_report(f, 'rolled' in f) for f in steps}
-    if len(curved) == 2: check(curved['rolled'] > curved['square'], 'the rolled-edge file carries the roundover surfaces the square-edged file lacks (%d against %d curved faces)' % (curved['rolled'], curved['square']))
+    # a roundover is one extra face along every piece of the outline, on the top and on the back
+    # (less any straight edge between two sharp corners, which is left square)
+    if len(curved) == 2: check(curved['rolled'] - curved['square'] >= 20 and (curved['rolled'] - curved['square']) % 2 == 0, 'the rolled-edge file carries the roundover faces the square-edged file lacks (%d faces against %d: %d more, the same number on the top as on the back)' % (curved['rolled'], curved['square'], curved['rolled'] - curved['square']))
     gmsh_volume = {}
     try:
         import gmsh
@@ -442,6 +457,9 @@ for f in glob.glob(D + '/*-neck.step'):
         check(abs(max(ys) - nk['scale']) < 1e-4 and abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4, 'it runs from the nut (one scale length from the scale line) to the end of the heel, %.2f mm' % (max(ys) - min(ys)))
         check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4 and abs(min(zs) - (T - nk['pocketDepth'])) < 1e-4, 'its flat top stands %.3f mm above the body and its heel sits on the pocket floor' % nk['heelStandProud'])
     heel_x = [v[0] for v in vs if v[1] < nk['scale'] - nk['nutToHeel'] + nk['pocketLength'] + 1e-6]
-    check(abs((max(heel_x) - min(heel_x)) - nk['heelWidth']) < 1e-3, 'the heel is the pocket\'s width, %.3f mm' % nk['heelWidth'])
+    hk = (nk['heelWidth'] - nk['nutWidth']) / 2 / nk['nutToHeel']; hR = nk['heelCornerR']; hy = nk['scale'] - nk['nutToHeel']
+    def half_at(y): return (nk['nutWidth'] + (nk['heelWidth'] - nk['nutWidth']) * (nk['scale'] - y) / nk['nutToHeel']) / 2
+    widest = 2 * (half_at(hy + hR) - hR * math.hypot(1, hk) + hR)   # the rounded corners bulge to here, just short of the full heel width
+    check(abs((max(heel_x) - min(heel_x)) - widest) < 2e-3 and all(abs(v[0]) <= half_at(v[1]) + 1e-3 for v in vs if v[1] < hy + nk['pocketLength'] + 1e-6), 'the heel is the pocket\'s shape: %.3f mm at its widest and nowhere wider than the neck\'s taper' % widest)
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)
