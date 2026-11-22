@@ -198,7 +198,6 @@ but no browser has yet loaded the engine from them; the published artifact has n
 touch gestures, Safari and Firefox are untried.
 
 **Waiting on the owner:**
-- Whether the T-style and J-style outlines (traced from his class templates) ship in a public release.
 - Notch or separate template as the neck pocket default.
 - Where alignment pins go in his shop, and whether they go through the body.
 - How ordering a cut template should work.
@@ -232,8 +231,10 @@ touch gestures, Safari and Firefox are untried.
   Chrome and make changes as I find issues"): `.github/workflows/publish.yml` publishes `dist/` with GitHub
   Pages on every change to main, after `npm test`. blackchapelstudios.com itself is not served from GitHub
   (his `BlackChapelStudios` repository is empty; `Fretboard-Designer` is one `index.html` put on the site
-  by hand), and cloud sessions cannot reach that site. Publishing is a public release: the open question
-  about the T-style and J-style outlines must be answered first.
+  by hand), and cloud sessions cannot reach that site. The site is edited in Squarespace (his answer).
+  His decisions that day: the T-style and J-style outlines ship in the public copy; merge the work into
+  main so main is the live version. From then on each fix goes in through a small pull request to main.
+  He was not sure which GitHub plan he has: Pages on a private repository needs a paid plan.
 - The owner's demo copy is the claude.ai artifact at https://claude.ai/artifact/5xPFL1MRmtKgMuWZZbzxC3
   (private to him). To refresh it, publish `dist/artifact.html` to that same link with the `downloads`
   capability, not as a new artifact.
