@@ -48,12 +48,16 @@ test('neck shape: thickness less the fretboard at the 1st and 12th frets, a half
   assert.ok(Math.abs(area / ((Math.PI / 2) * sec.half * sec.depth) - 1) < 0.002, 'half-ellipse area');
   assert.ok(backCurve(20, 15, 4).every((p) => Math.abs((Math.abs(p.x) / 20) ** 4 + (Math.abs(p.z) / 15) ** 4 - 1) < 1e-9), 'fuller shoulders follow the same rule at a higher power');
   // width: nut width at the nut, the pocket's width where the neck enters the body
-  assert.ok(Math.abs(n.at(g.nutY).half * 2 - nk.nutWidth) < 1e-9 && Math.abs(n.at(n.shaftEnd).half * 2 - nk.mouthWidth) < 1e-9);
+  assert.ok(Math.abs(n.at(g.nutY).half * 2 - nk.nutWidth) < 1e-9 && Math.abs(n.at(n.shaftEnd).half * 2 - (nk.nutWidth + ((nk.heelWidth - nk.nutWidth) * (g.nutY - n.shaftEnd)) / nk.nutToHeel)) < 1e-9);
   // the heel: as deep as the pocket plus what stands proud, sitting on the pocket floor, with the pocket's outline
   assert.ok(Math.abs(n.heelDepth - (nk.pocketDepth + nk.heelStandProud)) < 1e-9 && Math.abs(n.heelBottom - (T - nk.pocketDepth)) < 1e-9 && Math.abs(n.top - (T + nk.heelStandProud)) < 1e-9);
   assert.ok(Math.abs(n.at(n.shaftEnd).depth - n.heelDepth) < 1e-9 && n.at(n.shaftEnd).n > 20, 'the shaft is as deep as the heel, and all but square, where they meet');
   const hb = n.heel.reduce((b, p) => ({ x0: Math.min(b.x0, p.x), x1: Math.max(b.x1, p.x), y0: Math.min(b.y0, p.y), y1: Math.max(b.y1, p.y) }), { x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9 });
-  assert.ok(Math.abs(hb.x1 - hb.x0 - nk.heelWidth) < 1e-6 && Math.abs(hb.y0 - g.heelY) < 1e-6 && Math.abs(hb.y1 - (g.heelY + nk.pocketLength)) < 1e-6);
+  assert.ok(Math.abs(hb.y0 - g.heelY) < 1e-6 && Math.abs(hb.y1 - (g.heelY + nk.pocketLength)) < 1e-6);
+  // the heel is the pocket's own outline: its sides on the neck's taper, nowhere wider than the neck
+  const taperHalf = (y) => (nk.nutWidth + ((nk.heelWidth - nk.nutWidth) * (g.nutY - y)) / nk.nutToHeel) / 2;
+  assert.ok(n.heel.every((p) => Math.abs(p.x) <= taperHalf(p.y) + 1e-6) && n.heel.filter((p) => p.y > g.heelY + nk.heelCornerR + 0.01).every((p) => Math.abs(Math.abs(p.x) - taperHalf(p.y)) < 1e-6));
+  assert.ok(hb.x1 - hb.x0 < nk.heelWidth && hb.x1 - hb.x0 > 2 * taperHalf(n.shaftEnd));
   assert.ok(Math.abs(n.length - nk.nutToHeel) < 1e-9);
   // an older file, saved before the neck had a shape, opens with the starting shape
   const old = normalizeDesign({ schema: 'blackchapel.guitar/v1', outline: d.outline, neck: { scale: 647.7 } }).neck;

@@ -80,6 +80,7 @@ export default function Model3DDialog({ design, onClose, toast }) {
         : new Blob([await toSTEP(cad.rc, built.shape, `${design.name} body`)], { type: 'model/step' });
       try { built.shape.delete(); } catch (e) { /* already released */ }
       const res = await saveFile(`${slug(design.name)}-body.${kind}`, blob);
+      if (res.ok && built.squareEdges) res.message += ' The straight edge of the body at the neck pocket was left square, not rounded over, because the 3D engine cannot be trusted to roll a roundover along a straight edge between two sharp corners. Round that edge over by hand.';
       if (res.ok && built.bevelStrips) res.message += ' The rolled edge bevel was built from 8 flat strips, within a few hundredths of a millimeter of the curve, because the engine could not cut the smooth version on this body.';
       setResult(res);
       toast(res.message);

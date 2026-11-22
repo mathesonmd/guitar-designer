@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 85 geometry and export tests (Node, no browser)
+    npm test               # 92 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -139,6 +139,13 @@ than 0.3%, the save is refused.
 
 Known limits of both files, all stated in the save dialog:
 
+- A straight edge of the outline that ends in a sharp corner at both ends is left square, not rounded
+  over: on the starting shape that is the body's edge across the neck pocket (only its back edge, behind
+  the heel, is left in the wood; the pocket takes the top). The engine cannot be trusted there. Depending
+  on fractions of a millimeter in where the corners sat it returned a flawed face, or a face it called
+  valid that could not be meshed and left a hole in the STL. The result carries `squareEdges` and the
+  save dialog says to round that edge over by hand. The 3D picture and the weight still show it rolled
+  (about 0.1 cm3 of wood).
 - A roundover larger than the tightest outside curve of the outline cannot be rolled. Measured with the
   built-in outlines: the T-style rolls up to about 4 mm, the J-style about 6 mm, the double-cut 6.35 mm
   but not 12.7 mm. The save is refused with a plain message, and the "square edges" choice still works.
@@ -147,6 +154,32 @@ Known limits of both files, all stated in the save dialog:
 - It is the body only. There is no neck yet.
 - It does not work inside a claude.ai artifact.
 - Building runs on the page's main thread, so the page pauses for a few seconds.
+
+## The neck pocket
+
+The pocket is a direct cutout of the neck that sits in it (the owner's rule, 22 November 2026): its sides
+are the fretboard's edges, a straight taper from the heel's width at the end of the heel toward the nut's
+width at the nut (`neckHalfAt` in `src/model/design.js`, `pocketHalf` in `derive.js`). There is no
+separate pocket width any more: the old `mouthWidth` number is gone, and nut width joined the
+measure-before-you-cut list because it now sets how wide the pocket is at the body edge.
+
+- Corners of the body beside the pocket snap onto its edges (`seatedCorner`, `seatOnPocket`): within
+  3 mm (`POCKET_SNAP`) a corner point is moved onto the fretboard's edge at its own height, and two
+  corners within 0.5 mm of level (`POCKET_LEVEL`) are made level. It happens while a corner is dragged,
+  when a neck number changes, when a starting shape is chosen and when a file is opened. Smooth points
+  and mirrored outlines are never moved. A corner 3 to 8 mm off is named in the build checks.
+- The starting shape is the owner's own double-cut (16 points, sent 22 November 2026). As he drew it the
+  two corners at the neck were at -28 and 26.93 mm and 0.03 mm apart in height; seated, they are at
+  +/-26.68 mm and level.
+- In the CAD solid the pocket's cutter does not follow the pocket where there is no wood beside it
+  (`clearOfEdge` in `src/export/step.js`): from the point where the body's edge comes within 0.1 mm of
+  the pocket's side, the cutter steps 1 mm outward. On the T-style the body's treble edge runs along the
+  fretboard's edge for about 15 mm; with the cutter's wall lying on that edge the engine handed back a
+  body with no pocket at all and no error. Wood thinner than 0.1 mm beside the neck is not left in the
+  3D file. The 2D vectors and templates keep the pocket exactly as drawn.
+- The binding channel's cutter goes in as two pieces that overlap by 1 mm: as one closed ring the engine
+  skipped the whole cut on the starting shape at a width of exactly 2 mm (1.9 and 2.01 mm were fine).
+- `test/pocket.test.mjs` holds each of those cases against the sliced solid, in its own process.
 
 ## The neck
 

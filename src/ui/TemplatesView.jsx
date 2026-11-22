@@ -31,7 +31,7 @@ export function readme(design, templates, prep) {
     'BEFORE YOU CUT WOOD',
     '1. Cut or print the templates, then measure the two engraved scale bars. Each is labeled with the length it must measure.',
     templates.unverified.length
-      ? `2. These neck numbers have not been confirmed against a real neck and are engraved as CHECK notes: ${templates.unverified.map((k) => ({ nutToHeel: 'nut to end of heel', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'neck screw position', boardPastHeel: 'fretboard overhang' }[k] || k)).join(', ')}. Measure them before cutting.`
+      ? `2. These neck numbers have not been confirmed against a real neck and are engraved as CHECK notes: ${templates.unverified.map((k) => ({ nutToHeel: 'nut to end of heel', nutWidth: 'nut width', heelCornerR: 'heel corner radius', screwFromHeelEnd: 'neck screw position', boardPastHeel: 'fretboard overhang' }[k] || k)).join(', ')}. Measure them before cutting.`
       : '2. Check the neck and hardware you will use against the template before cutting.',
     '3. Make a test cut in scrap. These templates have been checked in software, not on a router.',
     templates.pocketSheet === 'own'

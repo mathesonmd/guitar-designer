@@ -369,7 +369,7 @@ test('edge bevel: the inner line is the same whether the outline is worked out f
 });
 
 const shaped = (fn, eb = {}) => { const d = bare(); d.body.edgeBevel = { ...d.body.edgeBevel, on: true, width: 15, drop: 6, ...eb }; if (fn) fn(d); return d; };
-const taperOff = (d) => { [0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14].forEach((i) => { d.outline.nodes[i].bw = 0; }); d.outline.nodes[7].bw = 50; d.outline.nodes[7].bd = 10; };
+const taperOff = (d) => { [0, 1, 2, 3, 4, 9, 10, 11, 12, 13, 14, 15].forEach((i) => { d.outline.nodes[i].bw = 0; }); d.outline.nodes[7].bw = 50; d.outline.nodes[7].bd = 10; };
 
 test('edge bevel: the inner line is smooth, with no kink where the width changes', () => {
   const d = shaped((q) => { q.outline.nodes[6].bw = 38; q.outline.nodes[7].bw = 55; q.outline.nodes[8].bw = 38; q.outline.nodes[5].bw = 14; q.outline.nodes[9].bw = 14; }, { width: 10 });

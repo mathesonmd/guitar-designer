@@ -25,9 +25,9 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 85 geometry and export tests (43 of them build the CAD solid)
+    npm test                  # 92 geometry and export tests (47 of them build the CAD solid)
     npm run build
-    node test/interact.mjs    # 34 click-through steps in headless Chromium
+    node test/interact.mjs    # 35 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
 
 All must pass. Add a test for every new behavior and for every bug fixed. The two browser scripts need
@@ -87,6 +87,19 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   point for point, or the skin fails. After dozens of builds in one process the engine starts failing on shapes it
   normally builds (the neck tests have their own file for that reason); the dialog tells people to
   reload the page.
+- The neck pocket (owner's rule, 22 November 2026): "the neck pocket should always follow the contour of
+  the fretboard shape... It should always be a direct cutout of the overlying fretboard shape", and the
+  body's corners there "snap to the edges of the fretboard". The pocket's sides are the neck's taper; there
+  is no separate pocket width (`mouthWidth` is gone). Corner points within 3 mm of the pocket's edge are
+  seated on it (`seatedCorner`, `seatOnPocket` in `design.js`); smooth points are never moved. The starting
+  shape is his own double-cut, sent the same day (he called the old one "weird around the cutouts").
+- Bodies are drawn to the fretboard's edge, so the pocket's wall often lies on the body's own edge (a
+  seated corner; the T-style's whole treble side). That is a touching cut. In `step.js` the pocket's cutter
+  steps 1 mm outward where the body's edge comes within 0.1 mm of it (`clearOfEdge`); a straight outline
+  edge between two sharp corners is never rolled (`squareEdges`, said in the save dialog); the binding
+  channel's cutter goes in as two overlapping pieces. Each was a silent wrong solid first:
+  `test/pocket.test.mjs`. After any change to the pocket or the outline's corners, build all four
+  starting shapes at 1 mm and 1/8 in roundovers, with and without contours, and check the STL for holes.
 - Contours live in `solid.js` as depth functions (`bevelPlane`, `bevelProfile`, `bellyDish`); `step.js`
   builds its cutters from the same profile pieces, so change the math in `solid.js` first. The belly rim
   blend is the one place the two differ on purpose: true rolled radius in CAD, close approximation in the
@@ -162,7 +175,8 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
 ## State of the work (November 2026)
 
 **Built:** outline editor with four starting shapes and reference overlays; Fender-pattern neck presets
-and custom necks; six pickup cavities plus a custom rectangle; three bridges; controls and back cavity;
+and custom necks; a neck pocket that is a direct cutout of the neck (sides on the fretboard's edges), with
+the body's corners snapping onto it; six pickup cavities plus a custom rectangle; three bridges; controls and back cavity;
 arm bevel (rolled like a flat-sander cut: straight along its line, curved across it; optionally flatter,
 blended, or kept between its squares with a run-out) and belly cut (a wide, short cone sized by center,
 length, reach and depth, with a short rim blend); a bevel around the top edge shaped from an inner line
@@ -182,7 +196,8 @@ holes (three a side or six in a line) on the drawing and in the headstock's own 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
 carved tops, dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the neck's truss rod channel and
 heel screw holes, a sculpted
-heel on the body, STEP roundovers larger than the outline's
+heel on the body, a roundover in the STEP and STL along a straight edge between two sharp corners (the
+body's edge behind the heel: left square, said in the save dialog), STEP roundovers larger than the outline's
 tightest outside curve, the purfling channel in the STEP and STL (it is in the 3D picture and the CNC
 vectors only), the binding channel on the routing templates, whole-guitar balance, ordering cut templates.
 
@@ -210,6 +225,8 @@ touch gestures, Safari and Firefox are untried.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.
+- Whether the tapered pocket and the snapping corners behave as he pictured, and whether his starting
+  shape came through as he drew it (22 November 2026).
 - Whether inch files import at the right size. (He confirmed in Aspire: the tapered edge bevel, the
   purfling lines, and that centering lines the vectors up with the model.)
 

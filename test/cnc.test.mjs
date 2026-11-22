@@ -39,7 +39,10 @@ test('pockets are at the finished edge and true position, on layers that carry t
   assert.ok(Math.abs(pb.y1 - (g.mouthY + 12)) < 1e-6, 'the pocket runs 12 mm past the body edge it opens through, so the bit can leave');
   // no offsets: the pocket is exactly the derived pocket, cut off at that height
   assert.ok(Math.abs(Math.abs(signedArea(expandArcs(pocket[0].verts, true))) - Math.abs(signedArea(g.pocketTo(g.mouthY + 12)))) < 0.05);
-  assert.ok(Math.abs(pb.w - d.neck.heelWidth - (d.neck.mouthWidth - d.neck.heelWidth) * ((pb.y1 - g.heelY) / d.neck.pocketLength)) < 0.01, 'pocket width is the neck\'s, with nothing added');
+  // the pocket's sides are the fretboard's edges, with nothing added: every point on a side is on the neck's taper
+  const sides = pocket[0].verts.filter((v) => v.y > g.heelY + d.neck.heelCornerR);
+  assert.ok(sides.length >= 4 && sides.every((v) => Math.abs(Math.abs(v.x) - g.neckHalf(v.y)) < 0.01), 'pocket sides follow the neck\'s taper');
+  assert.ok(pb.w < d.neck.heelWidth && pb.w > g.pocketMouthWidth, 'widest just above the heel\'s rounded corners, narrower toward the nut');
   const singles = top.layers.find((L) => /^TOP_SINGLE_COIL/.test(L.name));
   assert.equal(singles.count, 2);
   assert.equal(singles.depth, d.pickups[1].depth);

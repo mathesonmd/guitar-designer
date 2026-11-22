@@ -22,25 +22,26 @@ const N = (a) => a.map(([x, y, ix, iy, ox, oy, k]) => ({ x, y, ix, iy, ox, oy, k
 export const STARTERS = {
   doublecut: {
     label: 'Double-cut',
-    note: 'An original offset double-cutaway to reshape.',
+    note: 'An original offset double-cutaway to reshape.', // the owner's own redrawing of it, 22 November 2026
     outline: {
       symmetric: false,
       nodes: N([
         [-28, 256, 0, 0, -4, -9, 'c'],
-        [-47, 243, 9, 5, -15, -8, 's'],
+        [-43.57, 239.57, 10.85, 0.59, -34.34, -1.87, 's'],
         [-84, 316, 9, -18, -5, 10, 's'],
-        [-106, 318, 6, 10.4, -10, -17, 's'],
-        [-150, 208, 0, 52, 0, -40, 's'],
+        [-106, 318, 7.1, 8.56, -12.59, -15.18, 's'],
+        [-150.6, 212.22, 0, 52, 0, -40, 's'],
         [-121, 98, 0, 40, 0, -40, 's'],
         [-163, -36, 0, 48, 0, -52, 's'],
         [5, -148, -85, 0, 85, 0, 's'],
         [163, -42, 0, -52, 0, 46, 's'],
         [124, 84, 0, -40, 0, 34, 's'],
         [140, 172, 0, -30, 0, 30, 's'],
-        [101, 281, 8, -16, -5, 10, 's'],
-        [79, 282, 5, 10, -8, -16, 's'],
-        [47, 230, 13, -2, -9, 3, 's'],
-        [28, 252, 4, -9, 0, 0, 'c'],
+        [101, 281, 8, -16, -2.87, 5.74, 's'],
+        [88.11, 288.95, 4.84, 0.57, -3.59, -0.42, 's'],
+        [79, 282, 2.13, 4.26, -8, -16, 's'],
+        [49.31, 221.54, 31.23, 2.2, -11.56, -0.81, 's'],
+        [26.93, 255.97, 4.11, -17.26, 0, 0, 'c'],
       ]),
     },
   },
@@ -107,7 +108,7 @@ export function isVerified(design, key) {
 
 // Neck numbers that come from shop templates or assumptions and have not been confirmed on the real neck.
 export function unverifiedNeckKeys(design) {
-  return ['nutToHeel', 'heelCornerR', 'screwFromHeelEnd', 'boardPastHeel'].filter((key) => {
+  return ['nutToHeel', 'nutWidth', 'heelCornerR', 'screwFromHeelEnd', 'boardPastHeel'].filter((key) => {
     const b = neckBasis(design, key);
     return b && (b[0] === 'shop' || b[0] === 'assumed') && !isVerified(design, key);
   });
@@ -181,13 +182,56 @@ export function bindingChannel(design) {
   return { width: c.width, depth: Math.min(c.depth, T - 3) };
 }
 
+// Half the width of the neck (and so of the fretboard, and of the neck pocket) at a place along the body:
+// a straight taper from the nut's width at the nut to the heel's width at the end of the heel.
+export function neckHalfAt(neck, y) {
+  const nutY = neck.scale, heelY = neck.scale - neck.nutToHeel;
+  return (neck.nutWidth + (neck.heelWidth - neck.nutWidth) * ((nutY - y) / (nutY - heelY))) / 2;
+}
+
+// How near a corner of the body outline has to be to the pocket's edge to be taken as the corner at the pocket.
+export const POCKET_SNAP = 3;
+// Two corners at the pocket's mouth that are within this of level with each other are made level, so the
+// body's edge across the mouth is square to the centerline. (A hand-placed pair is rarely exactly level:
+// the owner's own shape had them 0.03 mm apart.)
+export const POCKET_LEVEL = 0.5;
+const besidePocket = (node, neck) => {
+  const heelY = neck.scale - neck.nutToHeel;
+  return node.k === 'c' && node.y >= heelY + 5 && node.y <= heelY + neck.pocketLength + 25 && Math.abs(node.x) >= 1
+    && Math.abs(Math.abs(node.x) - neckHalfAt(neck, node.y)) <= POCKET_SNAP;
+};
+// Where a corner point of the outline sits once it is seated on the pocket's edge, or null if the point is
+// not a corner beside the pocket. The pocket's edges are the fretboard's edges, so a body corner at the
+// pocket's mouth belongs exactly on them: off by a little, it leaves a sliver of wood beside the neck or
+// lets the pocket's wall run outside the body. `others` are the outline's other points: if the corner on
+// the other side of the pocket is nearly level with this one, this one is brought level with it.
+export function seatedCorner(node, neck, others = []) {
+  if (!besidePocket(node, neck)) return null;
+  const mate = others.find((q) => q !== node && besidePocket(q, neck) && Math.sign(q.x) !== Math.sign(node.x) && Math.abs(q.y - node.y) <= POCKET_LEVEL);
+  const y = mate ? mate.y : node.y;
+  return { ...node, x: Math.sign(node.x) * neckHalfAt(neck, y), y };
+}
+// The outline with its corners at the pocket seated on the pocket's edges, and level with each other when
+// they nearly are (the treble corner takes the bass corner's height). A mirrored outline has none: it is left alone.
+export function seatOnPocket(outline, neck) {
+  if (!outline || outline.symmetric || !Array.isArray(outline.nodes)) return outline;
+  let moved = false;
+  const nodes = outline.nodes.slice();
+  for (const side of [-1, 1]) for (let i = 0; i < nodes.length; i++) {
+    if (Math.sign(nodes[i].x) !== side) continue;
+    const q = seatedCorner(nodes[i], neck, side > 0 ? nodes : []);
+    if (q && (Math.abs(q.x - nodes[i].x) > 1e-9 || Math.abs(q.y - nodes[i].y) > 1e-9)) { moved = true; nodes[i] = q; }
+  }
+  return moved ? { ...outline, nodes } : outline;
+}
+
 export function defaultDesign() {
   const thickness = DEFAULT_THICKNESS;
   return {
     schema: SCHEMA,
     name: 'Untitled guitar',
     units: 'in',
-    outline: JSON.parse(JSON.stringify(STARTERS.doublecut.outline)),
+    outline: seatOnPocket(JSON.parse(JSON.stringify(STARTERS.doublecut.outline)), applyNeckPreset({}, 'fender22')),
     body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, edgeBevel: { on: false, ...EDGE_BEVEL_START, roll: 0, purfling: false, purflingWidth: PURFLING_START.width, purflingDepth: PURFLING_START.depth }, wood: 'alder', customDensity: 500 },
     neck: { ...applyNeckPreset({}, 'fender22'), back: makeNeckBack('standardThin'), head: makeHeadstock() },
     strings: { count: 6, nutSpread: 1.375 * IN },
@@ -264,5 +308,8 @@ export function normalizeDesign(raw) {
   if (!raw.outline || !Array.isArray(raw.outline.nodes) || raw.outline.nodes.length < 2) out.outline = d.outline;
   out.ghosts = Array.isArray(raw.ghosts) ? raw.ghosts : [];
   out.units = raw.units === 'mm' ? 'mm' : 'in';
+  // the pocket's sides follow the fretboard's edges; a design saved when the pocket was straight-sided has its
+  // corners at the pocket a little off the new edges, so they are seated on them as it opens
+  out.outline = seatOnPocket(out.outline, out.neck);
   return out;
 }

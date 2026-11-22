@@ -7,11 +7,10 @@ const FENDER_BASE = {
   scale: 647.7,                // 25.5 in
   nutToHeel: SHOP.nutToHeel,   // 466.98: nut face to the end of the heel
   heelWidth: (2 + 3 / 16) * IN, // 55.5625 at the heel end
-  mouthWidth: (2 + 3 / 16) * IN, // pocket width where the neck leaves the body (same = parallel pocket)
   pocketLength: 3 * IN,        // 76.2
   pocketDepth: (5 / 8) * IN,   // 15.875
   heelStandProud: (1 / 8) * IN, // heel sits this far above the body top
-  nutWidth: 41.9,              // 1.650 in; for drawing strings and the fretboard
+  nutWidth: 41.9,              // 1.650 in; with heelWidth it sets the neck's taper, which the pocket follows
   boardPastHeel: 0,            // fretboard overhang beyond the end of the heel
   screwAcross: 1.5 * IN,       // 38.1
   screwAlong: 2 * IN,          // 50.8
@@ -22,8 +21,7 @@ const FENDER_BASE = {
 
 const FENDER_BASIS = {
   scale: ['published', 'warmothNeckFit', 'Warmoth: “The standard scale length for Warmoth guitar parts is 25-1/2 in.”'],
-  heelWidth: ['published', 'warmothPocket', 'Warmoth: Strat and Tele pockets are 2-3/16 in (56 mm) wide.'],
-  mouthWidth: ['published', 'warmothPocket', 'Warmoth publishes one pocket width. Real necks taper slightly through the heel; measure yours if you want a tapered pocket.'],
+  heelWidth: ['published', 'warmothPocket', 'Warmoth: Strat and Tele pockets are 2-3/16 in (56 mm) wide. Here that is the width at the end of the heel; from there the pocket narrows with the neck.'],
   pocketLength: ['published', 'warmothPocket', 'Warmoth: pocket length 3 in (76 mm).'],
   pocketDepth: ['published', 'warmothPocket', 'Warmoth: pocket depth 5/8 in (16 mm). Their “720 Mod” is 0.720 in.'],
   heelStandProud: ['published', 'warmothPocket', 'Warmoth’s pocket depth drawing shows the heel standing 1/8 in (3 mm) above the body.'],
@@ -34,7 +32,7 @@ const FENDER_BASIS = {
   screwFromHeelEnd: ['shop', 'shop', 'First screw row is 13.49 mm from the heel end on the Black Chapel T-style template. Check against a pre-drilled neck.'],
   screwBodyHole: ['published', 'stewmacNeckPlate', 'StewMac recommends 3/16 in holes in the body and 1/8 in holes in the neck.'],
   screwNeckPilot: ['published', 'stewmacNeckPlate', 'StewMac recommends 1/8 in holes in the neck. Warmoth pre-drills necks at 1/8 in.'],
-  nutWidth: ['assumed', 'shop', 'Used for drawing only. 1.650 in matches the Black Chapel neck template; set it to your neck.'],
+  nutWidth: ['assumed', 'shop', '1.650 in matches the Black Chapel neck template. With the heel width it sets the taper of the neck, and so how wide the pocket is at the body edge. Measure your neck.'],
   boardPastHeel: ['assumed', null, 'Fretboard overhang past the heel. Measure your neck.'],
 };
 
@@ -76,7 +74,6 @@ export const NECK_FIELDS = [
   ['frets', 'Frets'],
   ['nutToHeel', 'Nut to end of heel'],
   ['heelWidth', 'Heel width at the end'],
-  ['mouthWidth', 'Pocket width at the body edge'],
   ['heelCornerR', 'Heel corner radius'],
   ['pocketDepth', 'Pocket depth'],
   ['boardPastHeel', 'Fretboard overhang past heel'],
@@ -87,7 +84,6 @@ export const NECK_FIELDS = [
 export const NECK_LABELS = {
   scale: 'Scale length',
   heelWidth: 'Heel width at the end',
-  mouthWidth: 'Pocket width at the body edge',
   pocketLength: 'Pocket length',
   pocketDepth: 'Pocket depth',
   heelStandProud: 'Heel height above the body top',
