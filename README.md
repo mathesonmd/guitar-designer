@@ -15,6 +15,9 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 The browser scripts need Playwright with Chromium installed; it is not listed in `package.json`.
 `CLAUDE.md` holds the working rules for anyone, person or AI, who changes this project.
 
+- `.github/workflows/publish.yml` publishes `dist/` with GitHub Pages whenever the main branch changes,
+  after running `npm test`. It needs Pages switched on once in the repository's settings (Source: GitHub
+  Actions). It does nothing on other branches.
 - `dist/index.html` is one complete file, like the Fretboard Designer's `index.html`. Point the host at
   `dist/`, or copy that file to wherever the site is served from.
 - `dist/artifact.html` is the same page without document tags, for publishing as a claude.ai artifact.

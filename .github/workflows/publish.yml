@@ -1,0 +1,45 @@
+# Publishes the app as a web page with GitHub Pages every time the main branch changes.
+# It runs the geometry tests first and publishes nothing if any of them fail, then builds the page fresh
+# from src/ and publishes the dist/ folder. It can also be run by hand from the Actions tab.
+#
+# One-time setup (in the repository's Settings, under Pages): set "Source" to "GitHub Actions".
+# The browser click-through tests are not run here: they need Chromium, which is not in package.json.
+name: Publish the app
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Geometry and export tests
+        run: npm test
+      - name: Build the page
+        run: npm run build
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+      - id: deploy
+        uses: actions/deploy-pages@v4

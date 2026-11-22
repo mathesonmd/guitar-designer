@@ -228,6 +228,12 @@ touch gestures, Safari and Firefox are untried.
 - Rebuild before committing so `dist/` matches `src/`.
 - Cloud sessions for this repository use the `guitar-designer` environment, which allows electricherald.com,
   cdn.jsdelivr.net and cdnjs.cloudflare.com. `curl` reaches them; the WebFetch tool does not.
+- Publishing (asked for 22 November 2026: "published on blackchapelstudios.com ... so I can test it in
+  Chrome and make changes as I find issues"): `.github/workflows/publish.yml` publishes `dist/` with GitHub
+  Pages on every change to main, after `npm test`. blackchapelstudios.com itself is not served from GitHub
+  (his `BlackChapelStudios` repository is empty; `Fretboard-Designer` is one `index.html` put on the site
+  by hand), and cloud sessions cannot reach that site. Publishing is a public release: the open question
+  about the T-style and J-style outlines must be answered first.
 - The owner's demo copy is the claude.ai artifact at https://claude.ai/artifact/5xPFL1MRmtKgMuWZZbzxC3
   (private to him). To refresh it, publish `dist/artifact.html` to that same link with the `downloads`
   capability, not as a new artifact.
