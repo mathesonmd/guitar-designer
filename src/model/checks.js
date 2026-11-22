@@ -213,6 +213,17 @@ export function runChecks(design, g, solid) {
     out.push({ level: 'note', ref: 'pocket', title: 'The neck pocket template has no alignment pins', detail: 'It can be lined up by the engraved centerline and the engraved body edge. For a positive fit, turn on alignment pin holes under Routing setup.' });
   }
 
+  /* ---- tuner holes ---- */
+  const tuners = g.neck && g.neck.head ? g.neck.head.tuners : [];
+  if (tuners.length) {
+    const out2 = tuners.filter((t) => t.gap < 0), tight = tuners.reduce((m, t) => Math.min(m, t.gap), Infinity);
+    if (out2.length) out.push({ level: 'error', ref: 'neck', title: `${out2.length === 1 ? 'A tuner hole breaks' : `${out2.length} tuner holes break`} out of the headstock’s outline`, detail: 'Move the holes toward the centerline or along the headstock, or redraw the outline around them.' });
+    else out.push({ level: 'ok', ref: 'neck', title: 'Every tuner hole is inside the headstock', detail: `The hole nearest the edge has ${L(tight)} of wood outside it. Check that against the body of your tuner and its washer.` });
+    const hdk = g.neck.head, early = tuners.filter((t) => t.v - t.d / 2 < hdk.reach);
+    if (early.length) out.push({ level: 'note', ref: 'neck', title: `${early.length === 1 ? 'A tuner hole sits' : `${early.length} tuner holes sit`} where the back is still carved`, detail: `The back of the headstock is not flat until ${L(hdk.reach)} past the nut (the transition length), so a tuner there has no flat to sit on. Move the first hole farther from the nut, or shorten the transition.` });
+    out.push({ level: 'note', ref: 'neck', verify: 'tunerHole', title: `Measure before you cut: tuner hole (${L(tuners[0].d)} across)`, detail: 'A starting value with no source. Tuner makers publish the hole their tuners need: set it to that.' });
+  }
+
   /* ---- numbers that still need a tape measure ---- */
   for (const key of unverifiedNeckKeys(design)) {
     out.push({ level: 'note', ref: 'neck', verify: key, title: `Measure before you cut: ${labelFor(key)} (${L(nk[key])})`, detail: neckBasis(design, key)[2] });

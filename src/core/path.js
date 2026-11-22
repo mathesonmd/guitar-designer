@@ -8,7 +8,7 @@ export const node = (x, y, ix = 0, iy = 0, ox = 0, oy = 0, k = 's') => ({ x, y, 
 export const cloneNodes = (nodes) => nodes.map((n) => ({ ...n }));
 
 // Mirror a node across the centerline (x = 0); in and out handles swap because direction reverses.
-const mirrorNode = (n) => ({ x: -n.x, y: n.y, ix: -n.ox, iy: n.oy, ox: -n.ix, oy: n.iy, k: n.k });
+const mirrorNode = (n) => ({ x: -n.x, y: n.y, ix: -n.ox, iy: n.oy, ox: -n.ix, oy: n.iy, k: n.k, ...(n.bw !== undefined ? { bw: n.bw } : {}), ...(n.bd !== undefined ? { bd: n.bd } : {}) });
 
 // outline = { symmetric, nodes }. When symmetric, `nodes` holds the left half only, running from the
 // top centerline node to the bottom centerline node; the right half is generated.
@@ -220,4 +220,53 @@ export function nodesFromSegments(segs, cornerFlags = []) {
     });
   }
   return nodes;
+}
+
+// For a closed chain of nodes, the index in the stored outline that each node of the expanded outline
+// came from (a mirrored outline stores only its left half).
+export function storedIndex(outline, i) {
+  if (!outline.symmetric || outline.nodes.length < 2) return i;
+  const m = outline.nodes.length - 1;
+  return i <= m ? i : 2 * m - i;
+}
+
+// The unit normal pointing into the shape at each node of a closed chain. At a smooth node it is square
+// to the curve; at a corner it splits the angle.
+export function inwardNormals(nodes) {
+  const n = nodes.length, ccw = signedArea(nodes) > 0 ? 1 : -1;
+  return nodes.map((p, i) => {
+    const prev = nodes[(i - 1 + n) % n], next = nodes[(i + 1) % n];
+    const dir = (ax, ay) => { const l = Math.hypot(ax, ay); return l > 1e-9 ? [ax / l, ay / l] : null; };
+    // which way the curve arrives at the node and which way it leaves
+    const din = dir(-p.ix, -p.iy) || dir(p.x - (prev.x + prev.ox), p.y - (prev.y + prev.oy)) || dir(p.x - prev.x, p.y - prev.y) || [1, 0];
+    const dout = dir(p.ox, p.oy) || dir(next.x + next.ix - p.x, next.y + next.iy - p.y) || dir(next.x - p.x, next.y - p.y) || din;
+    const t = dir(din[0] + dout[0], din[1] + dout[1]) || dout;
+    // `open` is 1 at a smooth point and smaller the sharper a corner is: the cosine of half the turn
+    return { x: -t[1] * ccw, y: t[0] * ccw, open: Math.sqrt(Math.max(0, (1 + din[0] * dout[0] + din[1] * dout[1]) / 2)) };
+  });
+}
+
+// An inner line for a bevel around the edge: every node of the closed chain moved into the shape by its
+// own width (widths[i]). Returns a chain with the same number of nodes in the same order, so segment i
+// of the outline pairs with segment i of the inner line. Handles are scaled by how much shorter or
+// longer each inner segment is than its outer one.
+// Away from corners the new line gets its own smooth curve through the moved points (each handle follows
+// the line from the point before to the point after), so it does not kink where the width changes.
+export function insetNodes(nodes, widths) {
+  const n = nodes.length, nrm = inwardNormals(nodes);
+  // (a negative width moves a point outward)
+  const moved = nodes.map((p, i) => ({ x: p.x + nrm[i].x * widths[i], y: p.y + nrm[i].y * widths[i] }));
+  const ratio = (i, j) => { const outer = Math.hypot(nodes[j].x - nodes[i].x, nodes[j].y - nodes[i].y); return outer > 1e-9 ? Math.hypot(moved[j].x - moved[i].x, moved[j].y - moved[i].y) / outer : 1; };
+  return nodes.map((p, i) => {
+    const a = moved[(i - 1 + n) % n], b = moved[(i + 1) % n], c = moved[i];
+    const tx = b.x - a.x, ty = b.y - a.y, tl = Math.hypot(tx, ty);
+    if (nrm[i].open > 0.985 && tl > 1e-9) {
+      // a smooth point: both handles lie along the line from the point before to the point after
+      const lin = Math.hypot(c.x - a.x, c.y - a.y) / 3, lout = Math.hypot(b.x - c.x, b.y - c.y) / 3;
+      return { x: c.x, y: c.y, ix: (-tx / tl) * lin, iy: (-ty / tl) * lin, ox: (tx / tl) * lout, oy: (ty / tl) * lout, k: p.k };
+    }
+    // a corner keeps the directions it had, scaled to the new segment lengths
+    const rin = ratio((i - 1 + n) % n, i), rout = ratio(i, (i + 1) % n);
+    return { x: c.x, y: c.y, ix: p.ix * rin, iy: p.iy * rin, ox: p.ox * rout, oy: p.oy * rout, k: p.k };
+  });
 }

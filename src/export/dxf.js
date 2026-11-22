@@ -5,7 +5,9 @@ import { extentOf } from './prepare.js';
 
 const n = (v) => (Math.round(v * 1e5) / 1e5).toString();
 
-export function toDXF(prep) {
+// `layers` defaults to the three template layers; the CNC vector files pass their own.
+// `units` is 'mm' or 'in': it only sets the header, the numbers are written as given.
+export function toDXF(prep, layers = LAYERS, units = 'mm') {
   const out = [];
   const g = (code, value) => { out.push(String(code)); out.push(String(value)); };
   const all = prep.sheets.flatMap((s) => s.paths);
@@ -13,8 +15,8 @@ export function toDXF(prep) {
 
   g(0, 'SECTION'); g(2, 'HEADER');
   g(9, '$ACADVER'); g(1, 'AC1009');
-  g(9, '$INSUNITS'); g(70, 4);     // millimeters
-  g(9, '$MEASUREMENT'); g(70, 1);  // metric
+  g(9, '$INSUNITS'); g(70, units === 'in' ? 1 : 4);     // 1 = inches, 4 = millimeters
+  g(9, '$MEASUREMENT'); g(70, units === 'in' ? 0 : 1);  // 0 = imperial, 1 = metric
   g(9, '$EXTMIN'); g(10, n(ext.x0)); g(20, n(ext.y0)); g(30, 0);
   g(9, '$EXTMAX'); g(10, n(ext.x1)); g(20, n(ext.y1)); g(30, 0);
   g(0, 'ENDSEC');
@@ -23,8 +25,8 @@ export function toDXF(prep) {
   g(0, 'TABLE'); g(2, 'LTYPE'); g(70, 1);
   g(0, 'LTYPE'); g(2, 'CONTINUOUS'); g(70, 0); g(3, 'Solid line'); g(72, 65); g(73, 0); g(40, 0);
   g(0, 'ENDTAB');
-  g(0, 'TABLE'); g(2, 'LAYER'); g(70, LAYERS.length);
-  for (const L of LAYERS) { g(0, 'LAYER'); g(2, L.name); g(70, 0); g(62, L.aci); g(6, 'CONTINUOUS'); }
+  g(0, 'TABLE'); g(2, 'LAYER'); g(70, layers.length);
+  for (const L of layers) { g(0, 'LAYER'); g(2, L.name); g(70, 0); g(62, L.aci); g(6, 'CONTINUOUS'); }
   g(0, 'ENDTAB');
   g(0, 'ENDSEC');
 

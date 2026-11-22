@@ -32,5 +32,17 @@ export const CONTROL_KINDS = {
 };
 export const CONTROL_NOTE = 'Hole sizes are starting values (3/8 in for pots and jacks, 12 mm for toggles). Measure the bushing on your part.';
 
+// Binding channel: a starting size only (basis: assumed). Binding strip comes in many sizes, so the
+// channel has to be set to the strip in hand: its thickness is the channel's width, its height the depth.
+export const BINDING_START = { width: 1.5, depth: 6 };
+
+// Bevel around the top edge: a starting width and depth only (basis: assumed). It is shaped by eye.
+export const EDGE_BEVEL_START = { width: 15, drop: 6 };
+// Purfling channel along the bevel's inner line: a starting size only (basis: assumed). Set it to the strip in hand.
+export const PURFLING_START = { width: 1.5, depth: 2 };
+
+// Belly cut: the radius of the short smooth transition at its rim. A starting size only (basis: assumed).
+export const BELLY_BLEND_START = 25;
+
 export const DEFAULT_THICKNESS = 1.75 * IN; // 44.45 — the usual solid-body blank; set it to your blank
 export const WOOD_LEFT_UNDER_CONTROLS = 0.25 * IN; // Black Chapel T-style template routes controls 1.5 in deep in a 1.75 in body

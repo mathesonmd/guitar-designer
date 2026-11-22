@@ -100,6 +100,7 @@ input.bad{border-color:var(--torch)}
 .num input{width:62px;text-align:right;font-family:var(--mono)}
 .check{display:flex;align-items:center;gap:8px;cursor:pointer;color:var(--bone);font-size:12px}
 .check input{accent-color:var(--brass);width:15px;height:15px;margin:0}
+h4.sub{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--brass);margin:16px 0 6px}
 .note{color:var(--bone-dim);font-size:11.5px;line-height:1.5;margin:6px 0 2px}
 .note b{color:var(--bone);font-weight:600}
 input[type=range]{accent-color:var(--brass);width:110px}
@@ -171,6 +172,8 @@ input[type=range]{accent-color:var(--brass);width:110px}
 .dialog header h2{margin:0;font-size:15px;font-weight:700}
 .dialog .content{overflow:auto;padding:6px 18px 18px;line-height:1.55}
 .dialog h4{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--brass);margin:18px 0 6px}
+.dialog ul.plain{margin:0;padding-left:18px}
+.dialog ul.plain li{margin:3px 0}
 .dialog table{border-collapse:collapse;width:100%;font-size:12px}
 .dialog td,.dialog th{text-align:left;padding:6px 10px 6px 0;vertical-align:top;border-top:1px solid var(--anvil2)}
 .dialog th{color:var(--bone-dim);font-weight:600;border-top:0}

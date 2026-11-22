@@ -1,8 +1,8 @@
 import React, { useRef, useState, useEffect, useMemo, useCallback } from 'react';
-import { expandOutline, nodesToSvgPath, nearestOnNodes, insertNode, removeNode, setHandle, setKind } from '../core/path.js';
+import { expandOutline, nodesToSvgPath, nearestOnNodes, insertNode, removeNode, setHandle, setKind, storedIndex } from '../core/path.js';
 import { fmtLen, unitLabel } from '../core/units.js';
 import { useSize } from './widgets.jsx';
-import { bellyDish } from '../model/solid.js';
+import { bellyDish, bevelPlane } from '../model/solid.js';
 
 const polyD = (p) => (p && p.length ? 'M' + p.map((q) => `${+q.x.toFixed(3)} ${+q.y.toFixed(3)}`).join('L') + 'Z' : '');
 const lineD = (p) => (p && p.length ? 'M' + p.map((q) => `${+q.x.toFixed(3)} ${+q.y.toFixed(3)}`).join('L') : '');
@@ -15,8 +15,23 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
   const drag = useRef(null);
   const pointers = useRef(new Map());
   const units = design.units;
-  const sym = design.outline.symmetric;
-  const nodes = design.outline.nodes;
+  // Which outline is being edited: the body's, or the headstock's. The headstock's is drawn flat, at its
+  // true shape, starting at the nut line, so on the drawing its points sit `lift` above where they are stored.
+  const headOn = !!(design.neck.head && design.neck.head.on);
+  const of = sel && sel.of === 'head' && headOn ? 'head' : 'body';
+  const lift = of === 'head' ? g.nutY : 0;
+  const cur = of === 'head' ? design.neck.head.outline : design.outline;
+  const sym = of === 'body' && cur.symmetric;
+  const open = of === 'head';       // an open outline's two end points are fixed
+  const closed = !sym && !open;
+  const up = (n) => (lift ? { ...n, y: n.y + lift } : n), down = (n) => (lift ? { ...n, y: n.y - lift } : n);
+  const nodes = useMemo(() => cur.nodes.map(up), [cur.nodes, lift]);
+  const stored = (ds) => (of === 'head' ? ds.neck.head.outline.nodes : ds.outline.nodes);
+  const store = (ds, ns) => (of === 'head'
+    ? { ...ds, neck: { ...ds.neck, head: { ...ds.neck.head, outline: { ...ds.neck.head.outline, nodes: ns } } } }
+    : { ...ds, outline: { ...ds.outline, nodes: ns } });
+  const fixed = (i, count) => open && (i === 0 || i === count - 1);
+  const pick = (extra) => (of === 'head' ? { ...extra, of: 'head' } : extra);
 
   const fit = useCallback(() => {
     if (!size.w || !size.h) return;
@@ -25,6 +40,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     const s = Math.min(size.w / (x1 - x0), size.h / (y1 - y0));
     setView({ s, tx: size.w / 2 - ((x0 + x1) / 2) * s, ty: size.h / 2 + ((y0 + y1) / 2) * s });
   }, [size.w, size.h, g.bbox, g.heelY]);
+
+  // When the headstock's outline is picked for reshaping, bring the headstock into view.
+  useEffect(() => {
+    if (of !== 'head' || !size.w || !size.h || !g.neck || !g.neck.head) return;
+    const hw = Math.max(40, ...g.neck.head.poly.map((p) => Math.abs(p.x))) + 30, y0 = g.nutY - 50, y1 = g.nutY + g.neck.head.length + 30;
+    const s = Math.min(size.w / (2 * hw), size.h / (y1 - y0));
+    setView({ s, tx: size.w / 2, ty: size.h / 2 + ((y0 + y1) / 2) * s });
+  }, [of]); // eslint-disable-line
 
   const fitted = useRef(false);
   useEffect(() => { if (!fitted.current && size.w > 0) { fitted.current = true; fit(); } }, [size.w, fit]);
@@ -72,15 +95,16 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     const w = toWorld(e);
     if (!t || e.button === 1) { drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, view, moved: false }; return; }
     const k = t.dataset.k, id = t.dataset.id, i = t.dataset.i !== undefined ? +t.dataset.i : undefined;
-    if (k === 'outline') { setSel({ kind: 'outline' }); drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, view, moved: false, keepSel: true }; return; }
+    if (k === 'outline') { setSel(t.dataset.of === 'head' ? { kind: 'outline', of: 'head' } : { kind: 'outline' }); drag.current = { kind: 'pan', x: e.clientX, y: e.clientY, view, moved: false, keepSel: true }; return; }
     begin();
-    if (k === 'node') { setSel({ kind: 'node', i }); drag.current = { kind: 'node', i, w0: w, n0: { ...nodes[i] } }; }
-    else if (k === 'hin' || k === 'hout') { setSel({ kind: 'node', i }); drag.current = { kind: k, i, n0: { ...nodes[i] } }; }
+    if (k === 'node') { setSel(pick({ kind: 'node', i })); drag.current = { kind: 'node', i, w0: w, n0: { ...nodes[i] } }; }
+    else if (k === 'hin' || k === 'hout') { setSel(pick({ kind: 'node', i })); drag.current = { kind: k, i, n0: { ...nodes[i] } }; }
     else if (k === 'pickup') { const p = design.pickups.find((q) => q.id === id); setSel({ kind: 'pickup', id }); drag.current = { kind: 'pickup', id, w0: w, p0: { ...p } }; }
     else if (k === 'control') { const c = design.controls.find((q) => q.id === id); setSel({ kind: 'control', id }); drag.current = { kind: 'control', id, w0: w, p0: { ...c } }; }
     else if (k === 'cavity') { const c = design.cavities.find((q) => q.id === id); setSel({ kind: 'cavity', id }); drag.current = { kind: 'cavity', id, w0: w, p0: { ...c } }; }
-    else if (k === 'bevel') { setSel({ kind: 'bevel', id }); drag.current = { kind: 'bevel', id, i }; }
+    else if (k === 'bevel') { setSel({ kind: 'bevel', id }); drag.current = { kind: 'bevel', id, i: id === 'belly' ? t.dataset.i : i }; }
     else if (k === 'reg') { drag.current = { kind: 'reg', i }; }
+    else if (k === 'edgebevel') { const h = g.bevelEdge && g.bevelEdge.handles.find((q) => q.i === i); setSel({ kind: 'edgebevel', i }); if (h) drag.current = { kind: 'edgebevel', i, at: h.outer, n: h.normal }; }
   };
 
   const onMove = (e) => {
@@ -109,21 +133,23 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       let dx = w.x - d.w0.x, dy = w.y - d.w0.y;
       if (e.shiftKey) { if (Math.abs(dx) > Math.abs(dy)) dy = 0; else dx = 0; }
       edit((ds) => {
-        const ns = ds.outline.nodes.slice();
+        const ns = stored(ds).slice();
+        if (fixed(d.i, ns.length)) return ds; // the headstock's two ends stay on the corners of the nut
         const n = { ...d.n0, x: d.n0.x + dx, y: d.n0.y + dy };
-        if (ds.outline.symmetric) { if (d.i === 0 || d.i === ns.length - 1) n.x = 0; else n.x = Math.min(n.x, -0.5); }
-        ns[d.i] = n;
-        return { ...ds, outline: { ...ds.outline, nodes: ns } };
+        if (sym) { if (d.i === 0 || d.i === ns.length - 1) n.x = 0; else n.x = Math.min(n.x, -0.5); }
+        if (open) n.y = Math.max(n.y, lift + 1);
+        ns[d.i] = down(n);
+        return store(ds, ns);
       }, T);
     } else if (d.kind === 'hin' || d.kind === 'hout') {
       edit((ds) => {
-        const ns = ds.outline.nodes.slice();
+        const ns = stored(ds).slice();
         let base = e.altKey ? { ...d.n0, k: 'c' } : d.n0;
         let hx = w.x - base.x, hy = w.y - base.y;
-        const center = ds.outline.symmetric && (d.i === 0 || d.i === ns.length - 1);
+        const center = sym && (d.i === 0 || d.i === ns.length - 1);
         if (center && base.k === 's') hy = 0;
-        ns[d.i] = setHandle(base, d.kind === 'hout' ? 'out' : 'in', hx, hy);
-        return { ...ds, outline: { ...ds.outline, nodes: ns } };
+        ns[d.i] = down(setHandle(base, d.kind === 'hout' ? 'out' : 'in', hx, hy));
+        return store(ds, ns);
       }, T);
     } else if (d.kind === 'pickup') {
       const free = e.altKey || Math.abs(d.p0.x) > 0.01;
@@ -132,6 +158,27 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       edit((ds) => ({ ...ds, controls: ds.controls.map((c) => (c.id === d.id ? { ...c, x: d.p0.x + (w.x - d.w0.x), y: d.p0.y + (w.y - d.w0.y) } : c)) }), T);
     } else if (d.kind === 'cavity') {
       edit((ds) => ({ ...ds, cavities: ds.cavities.map((c) => (c.id === d.id ? { ...c, x: d.p0.x + (w.x - d.w0.x), y: d.p0.y + (w.y - d.w0.y) } : c)) }), T);
+    } else if (d.kind === 'edgebevel') {
+      // a square on the edge bevel's inner line: how far in from its outline point it sits is that point's width
+      const width = Math.max(0, (w.x - d.at.x) * d.n.x + (w.y - d.at.y) * d.n.y);
+      edit((ds) => {
+        const ns = ds.outline.nodes.slice(), j = storedIndex(ds.outline, d.i);
+        ns[j] = { ...ns[j], bw: Math.round(width * 100) / 100 };
+        return { ...ds, outline: { ...ds.outline, nodes: ns } };
+      }, T);
+    } else if (d.kind === 'bevel' && d.id === 'belly') {
+      // the bowl: its middle moves it, the end square sets its length and turns it, the side square sets its reach
+      edit((ds) => {
+        const b = ds.contours.belly, vx = w.x - b.x, vy = w.y - b.y;
+        let next = b;
+        if (d.i === 'c') next = { ...b, x: w.x, y: w.y };
+        else if (d.i === 'l') {
+          let ang = Math.atan2(-vx, vy);
+          if (Math.abs(ang) < 0.035) ang = 0; // within 2 degrees, settle parallel to the centerline
+          next = { ...b, len: Math.max(20, 2 * Math.hypot(vx, vy)), angle: ang };
+        } else if (d.i === 'w') next = { ...b, reach: Math.max(5, Math.abs(vx * Math.cos(b.angle || 0) + vy * Math.sin(b.angle || 0))) };
+        return { ...ds, contours: { ...ds.contours, belly: next } };
+      }, T);
     } else if (d.kind === 'bevel') {
       edit((ds) => ({ ...ds, contours: { ...ds.contours, [d.id]: { ...ds.contours[d.id], ['x' + d.i]: w.x, ['y' + d.i]: w.y } } }), T);
     } else if (d.kind === 'reg') {
@@ -155,13 +202,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     if (!t) { fit(); return; }
     if (t.dataset.k !== 'outline') return;
     const w = toWorld(e);
-    const hit = nearestOnNodes(nodes, w, !sym);
+    if ((t.dataset.of === 'head') !== (of === 'head')) { setSel(t.dataset.of === 'head' ? { kind: 'outline', of: 'head' } : { kind: 'outline' }); return; }
+    const hit = nearestOnNodes(nodes, w, closed);
     if (hit.seg === undefined) return;
-    const r = insertNode(nodes, hit.seg, hit.t, !sym);
+    const r = insertNode(nodes, hit.seg, hit.t, closed);
     begin();
-    edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: r.nodes } }));
+    edit((ds) => store(ds, r.nodes.map(down)));
     commit();
-    setSel({ kind: 'node', i: r.index });
+    setSel(pick({ kind: 'node', i: r.index }));
   };
 
   const onKey = (e) => {
@@ -175,12 +223,14 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     let next = null, nextSel;
     if (sel.kind === 'node') {
       const isCenter = sym && (sel.i === 0 || sel.i === nodes.length - 1);
+      const isFixed = fixed(sel.i, nodes.length);
       if (del) {
-        if (isCenter || nodes.length <= 3) return;
-        next = { ...design, outline: { ...design.outline, nodes: removeNode(nodes, sel.i) } };
-        nextSel = { kind: 'outline' };
+        if (isCenter || isFixed || nodes.length <= 3) return;
+        next = store(design, removeNode(cur.nodes, sel.i));
+        nextSel = pick({ kind: 'outline' });
       } else {
-        next = { ...design, outline: { ...design.outline, nodes: nodes.map((n, i) => (i === sel.i ? { ...n, x: isCenter ? 0 : (sym ? Math.min(n.x + dir[0] * step, -0.5) : n.x + dir[0] * step), y: n.y + dir[1] * step } : n)) } };
+        if (isFixed) return;
+        next = store(design, cur.nodes.map((n, i) => (i === sel.i ? { ...n, x: isCenter ? 0 : (sym ? Math.min(n.x + dir[0] * step, -0.5) : n.x + dir[0] * step), y: n.y + dir[1] * step } : n)));
       }
     } else {
       const key = { pickup: 'pickups', control: 'controls', cavity: 'cavities' }[sel.kind];
@@ -213,14 +263,27 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
     return { dm, dM };
   }, [show.grid, view, size.w, size.h, units]);
 
+  // the arm bevel's line: right across the body, or between its squares when the cut is kept there
+  // the headstock's outline, flat and at its true shape, standing on the nut line
+  const headD = useMemo(() => (g.neck && g.neck.head ? nodesToSvgPath(g.neck.head.nodes.map((n) => ({ ...n, y: n.y + g.nutY })), false) + 'Z' : ''), [g.neck, g.nutY]);
+  const armLine = useMemo(() => { const m = bevelPlane(design.contours.arm, g.outline, g.centroid); return m ? m.ends : null; }, [design.contours.arm, g.outline, g.centroid]);
+  // where the belly cut's three squares sit: its middle, the end of its length, and its reach toward the body
+  const bellyHandles = useMemo(() => {
+    const b = design.contours.belly;
+    if (!b.on) return null;
+    const ang = b.angle || 0, ux = Math.cos(ang), uy = Math.sin(ang);
+    const toward = ((g.centroid.x - b.x) * ux + (g.centroid.y - b.y) * uy) >= 0 ? 1 : -1;
+    return { c: { x: b.x, y: b.y }, l: { x: b.x - uy * (b.len / 2), y: b.y + ux * (b.len / 2) }, w: { x: b.x + ux * b.reach * toward, y: b.y + uy * b.reach * toward } };
+  }, [design.contours.belly, g.centroid]);
   const bellyEdge = useMemo(() => { const d = bellyDish(design.contours.belly); return d ? d.ellipse(1, 144) : null; }, [design.contours.belly]);
   const selNode = nodeSel >= 0 ? nodes[nodeSel] : null;
   const selNodeScreen = selNode ? S(selNode) : null;
-  const isCenterNode = (i) => sym && (i === 0 || i === nodes.length - 1);
+  const isCenterNode = (i) => (sym || open) && (i === 0 || i === nodes.length - 1);
   const NS = { vectorEffect: 'non-scaling-stroke' };
 
   const hint = editing
-    ? 'Drag points and handles · double-click the outline to add a point · Delete removes the selected point'
+    ? (of === 'head' ? 'Headstock, drawn flat at its true shape · drag points and handles · double-click its outline to add a point · its two ends stay on the nut'
+      : 'Drag points and handles · double-click the outline to add a point · Delete removes the selected point')
     : sel && sel.kind === 'pickup' ? 'Drag along the strings · hold Alt to move sideways · arrow keys nudge'
       : 'Click the outline to edit its shape · drag parts to move them · drag empty space to pan · scroll to zoom';
 
@@ -250,13 +313,19 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
               style={{ cursor: c.kind === 'cavity' ? 'move' : 'default' }} />
           ))}
 
-          <path d={outlineD} stroke={editing ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing ? 1.8 : 1.6} {...NS} style={{ pointerEvents: 'none' }} />
+          <path d={outlineD} stroke={editing && of === 'body' ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing && of === 'body' ? 1.8 : 1.6} {...NS} style={{ pointerEvents: 'none' }} />
+          {headD && <path d={headD} fill="var(--anvil)" fillOpacity=".5" stroke={editing && of === 'head' ? 'var(--torch)' : 'var(--bone)'} strokeWidth={editing && of === 'head' ? 1.8 : 1.4} {...NS} style={{ pointerEvents: 'none' }} />}
+          {g.neck && g.neck.head && g.neck.head.tuners.map((t, i) => <circle key={'tuner' + i} data-k="tuner" cx={t.x} cy={t.v + g.nutY} r={t.d / 2} fill="var(--ink, #151210)" stroke={t.gap < 0 ? 'var(--ember, #e2642f)' : 'var(--bone)'} strokeWidth="1" {...NS} style={{ pointerEvents: 'none' }} />)}
+          {headD && <path d={headD} stroke="transparent" strokeWidth="14" fill="none" {...NS} data-k="outline" data-of="head" style={{ cursor: 'pointer' }} />}
           <path d={outlineD} stroke="transparent" strokeWidth="14" {...NS} data-k="outline" style={{ cursor: 'pointer' }} />
 
-          {design.contours.arm.on && <path d={`M${design.contours.arm.x1} ${design.contours.arm.y1}L${design.contours.arm.x2} ${design.contours.arm.y2}`} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="9 4" {...NS} />}
+          {armLine && <path d={`M${armLine[0].x} ${armLine[0].y}L${armLine[1].x} ${armLine[1].y}`} data-k="armline" stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="9 4" {...NS} clipPath="url(#bodyclip)" style={{ pointerEvents: 'none' }} />}
           {bellyEdge && <path d={polyD(bellyEdge)} stroke="var(--ghost)" strokeWidth="1.4" strokeDasharray="2 5" {...NS} clipPath="url(#bodyclip)" />}
-          {bellyEdge && <path d={`M${design.contours.belly.x1} ${design.contours.belly.y1}L${design.contours.belly.x2} ${design.contours.belly.y2}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
+          {bellyEdge && bellyHandles && <path d={`M${bellyHandles.l.x} ${bellyHandles.l.y}L${bellyHandles.c.x} ${bellyHandles.c.y}L${bellyHandles.w.x} ${bellyHandles.w.y}`} stroke="var(--ghost)" strokeWidth="1" opacity=".6" {...NS} />}
 
+          {g.purfling && g.purfling.inner.map((p, i) => <path key={'purf' + i} d={polyD(p)} data-k="purfling" stroke="var(--brass)" strokeWidth="1" strokeDasharray="3 3" fill="none" {...NS} style={{ pointerEvents: 'none' }} />)}
+          {g.bevelEdge && <path d={polyD(g.bevelEdge.innerPoly)} data-k="edgeline" stroke="var(--brass)" strokeWidth="1.3" fill="none" {...NS} style={{ pointerEvents: 'none' }} />}
+          {g.binding && g.binding.inner.map((p, i) => <path key={'bind' + i} d={polyD(p)} data-k="binding" stroke="var(--brass)" strokeWidth="1" strokeDasharray="5 3" fill="none" {...NS} />)}
           {show.cavities && <path d={polyD(g.pocket)} stroke="var(--bone-dim)" strokeWidth="1.2" fill="rgba(20,18,16,.55)" {...NS} clipPath="url(#bodyclip)" />}
           {show.cavities && g.cuts.filter((c) => c.side === 'top' && c.kind !== 'pocket').map((c) => (
             <path key={c.id} d={polyD(c.poly)} data-k={c.kind === 'pickup' ? 'pickup' : undefined} data-id={c.ref}
@@ -311,15 +380,24 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
           })}
         </g>
 
+        {g.bevelEdge && g.bevelEdge.handles.map((h) => {
+          const p = S(h.inner), picked = sel && sel.kind === 'edgebevel' && sel.i === h.i;
+          return <g key={'eb' + h.i} data-k="edgebevel" data-i={h.i} data-picked={picked ? '1' : undefined} style={{ cursor: 'move' }}>
+            <circle cx={p.x} cy={p.y} r="11" fill="transparent" /><rect x={p.x - (picked ? 5.5 : 4)} y={p.y - (picked ? 5.5 : 4)} width={picked ? 11 : 8} height={picked ? 11 : 8} transform={`rotate(45 ${p.x} ${p.y})`} fill={picked ? 'var(--brass)' : 'var(--forge)'} stroke="var(--brass)" strokeWidth="1.6" />
+          </g>;
+        })}
+
         {['arm', 'belly'].map((key) => {
           const c = design.contours[key];
-          if (!c.on) return null;
-          return [1, 2].map((i) => {
-            const p = S({ x: c['x' + i], y: c['y' + i] });
+          if (!c.on || (key === 'belly' && !bellyHandles)) return null;
+          const spots = key === 'arm' ? { 1: { x: c.x1, y: c.y1 }, 2: { x: c.x2, y: c.y2 } } : bellyHandles;
+          const first = S(spots[key === 'arm' ? 1 : 'c']);
+          return Object.keys(spots).map((i) => {
+            const p = S(spots[i]);
             return <g key={key + i} data-k="bevel" data-id={key} data-i={i} style={{ cursor: 'move' }}>
               <circle cx={p.x} cy={p.y} r="12" fill="transparent" /><rect x={p.x - 5} y={p.y - 5} width="10" height="10" rx="2" fill="var(--forge)" stroke="var(--ghost)" strokeWidth="1.6" />
             </g>;
-          }).concat(<text key={key + 't'} x={S({ x: c.x1, y: c.y1 }).x + 10} y={S({ x: c.x1, y: c.y1 }).y + (key === 'arm' ? -8 : 20)} fill="var(--ghost)" fontSize="10.5" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{key === 'arm' ? 'arm bevel starts (top)' : 'belly cut, deepest point (back)'}</text>);
+          }).concat(<text key={key + 't'} x={first.x + 10} y={first.y + (key === 'arm' ? -8 : 20)} fill="var(--ghost)" fontSize="10.5" fontFamily="var(--mono)" style={{ pointerEvents: 'none' }}>{key === 'arm' ? 'arm bevel starts (top)' : 'belly cut, center (back)'}</text>);
         })}
 
         {editing && nodes.map((n, i) => {
@@ -343,12 +421,13 @@ export default function Canvas2D({ design, g, sel, setSel, edit, begin, commit, 
       </svg>
 
       {selNode && selNodeScreen && !drag.current && (
-        <div className="float" style={{ left: Math.max(8, Math.min(size.w - 250, selNodeScreen.x + 16)), top: Math.max(8, Math.min(size.h - 50, selNodeScreen.y - 46)) }}>
+        /* kept well clear of the point and its handles: below a point in the upper half of the drawing, above one in the lower half */
+        <div className="float" data-k="pointbar" style={{ left: Math.max(8, Math.min(size.w - 250, selNodeScreen.x - 120)), top: selNodeScreen.y < size.h / 2 ? Math.min(size.h - 50, selNodeScreen.y + 96) : Math.max(8, selNodeScreen.y - 136) }}>
           <div className="seg" role="group" aria-label="Point type">
-            <button type="button" className={selNode.k === 's' ? 'on' : ''} onClick={() => { begin(); edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: ds.outline.nodes.map((n, i) => (i === nodeSel ? setKind(n, 's') : n)) } })); commit(); }}>Smooth</button>
-            <button type="button" className={selNode.k === 'c' ? 'on' : ''} onClick={() => { begin(); edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: ds.outline.nodes.map((n, i) => (i === nodeSel ? setKind(n, 'c') : n)) } })); commit(); }}>Corner</button>
+            <button type="button" className={selNode.k === 's' ? 'on' : ''} onClick={() => { begin(); edit((ds) => store(ds, stored(ds).map((n, i) => (i === nodeSel ? setKind(n, 's') : n)))); commit(); }}>Smooth</button>
+            <button type="button" className={selNode.k === 'c' ? 'on' : ''} onClick={() => { begin(); edit((ds) => store(ds, stored(ds).map((n, i) => (i === nodeSel ? setKind(n, 'c') : n)))); commit(); }}>Corner</button>
           </div>
-          {!isCenterNode(nodeSel) && nodes.length > 3 && <button type="button" className="btn small" onClick={() => { begin(); edit((ds) => ({ ...ds, outline: { ...ds.outline, nodes: removeNode(ds.outline.nodes, nodeSel) } })); setSel({ kind: 'outline' }); commit(); }}>Delete point</button>}
+          {!isCenterNode(nodeSel) && nodes.length > 3 && <button type="button" className="btn small" onClick={() => { begin(); edit((ds) => store(ds, removeNode(stored(ds), nodeSel))); setSel(pick({ kind: 'outline' })); commit(); }}>Delete point</button>}
         </div>
       )}
 

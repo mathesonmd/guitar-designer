@@ -2,7 +2,7 @@
 // document, the screen and the downloaded files end up as. Usage: node test/interact.mjs [outdir]
 import fs from 'node:fs';
 import path from 'node:path';
-import { open, out } from './browser.mjs';
+import { open, out, fetched } from './browser.mjs';
 
 fs.mkdirSync(out, { recursive: true });
 const dl = path.join(out, 'downloads');
@@ -60,8 +60,8 @@ const waitToast = async (re) => {
   throw new Error(`message not shown: wanted ${re}, last saw "${last}"`);
 };
 const setField = async (selector, text) => { const f = page.locator(selector); await f.click(); await f.fill(text); await f.press('Enter'); };
-const saveDownload = async (trigger) => {
-  const [d] = await Promise.all([page.waitForEvent('download', { timeout: 20000 }), trigger()]);
+const saveDownload = async (trigger, timeout = 20000) => {
+  const [d] = await Promise.all([page.waitForEvent('download', { timeout }), trigger()]);
   const p = path.join(dl, d.suggestedFilename());
   await d.saveAs(p);
   return p;
@@ -407,7 +407,7 @@ await step('body thickness, bevels and wood change the weight; the 3D view draws
   await settle(900);
   const w1 = await page.locator('section[data-sec="body"] .note:has-text("Estimated body weight")').innerText();
   assert(w0 !== w1, 'weight changed with bevels');
-  assert(await page.locator('.stage [data-k="bevel"]').count() === 4, 'four bevel handles');
+  assert(await page.locator('.stage [data-k="bevel"]').count() === 5, 'two squares for the arm bevel and three for the belly cut');
   await page.selectOption('#b-wood', 'mahogany');
   await settle(900);
   const w2 = await page.locator('section[data-sec="body"] .note:has-text("Estimated body weight")').innerText();
@@ -447,6 +447,386 @@ await step('template files download: pack, SVG, PDF (Letter and A4) and DXF', as
   files.dxf = await saveDownload(() => page.click('.tbar button:text-is("DXF")'));
   for (const [k, p] of Object.entries(files)) assert(fs.statSync(p).size > 2000, `${k} is ${fs.statSync(p).size} bytes`);
   return Object.entries(files).map(([k, p]) => `${path.basename(p)} ${(fs.statSync(p).size / 1024).toFixed(0)} KB`).join(' · ');
+});
+
+await step('a 3D model of the body saves as STEP (rolled or square edges) and as STL; the 3D engine is fetched only then', async () => {
+  await tab('3D'); await settle(1200);
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  await dlg.waitFor({ timeout: 3000 });
+  // the click-through's later checks read millimeter files
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
+  const said = await dlg.innerText();
+  assert(/arm bevel, rolled so it leaves the top with no crease, straight along its line right across the body/i.test(said) && /belly cut, as a shallow cone with a rounded rim/i.test(said), 'the dialog lists the arm bevel and belly cut');
+  assert(/Not in the 3D file/i.test(said) && /No depth has been entered/i.test(said), 'the dialog names the holes that are left out');
+  assert(/has not been opened in Fusion or a CAM program/.test(said) && /Vectric Aspire does not/.test(said), 'the dialog says what the STEP file has and has not been checked in, and that Aspire does not open it');
+  assert(fetched.length === 0, 'no 3D engine file was fetched before Save was clicked');
+  await page.screenshot({ path: path.join(out, 'model3d-dialog.png') });
+  const t0 = Date.now();
+  files.step = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const first = Date.now() - t0;
+  assert(fetched.length === 3, `three engine files fetched, got ${fetched.length}`);
+  const head = fs.readFileSync(files.step, 'utf8').slice(0, 200);
+  assert(head.startsWith('ISO-10303-21;'), 'file starts as a STEP file: ' + head.slice(0, 30));
+  await dlg.locator('[role="status"]:has-text("body.step")').waitFor({ timeout: 5000 });
+  // square edges: a second save, with no second fetch of the engine
+  await dlg.locator('label.check:has-text("Roll the edge roundovers") input').uncheck();
+  assert(/Square edges/.test(await dlg.innerText()), 'the list now says the edges are square');
+  const rolled = files.step.replace('.step', '-rolled.step'); fs.renameSync(files.step, rolled); files.step = rolled;
+  const t1 = Date.now();
+  files.stepSquare = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const second = Date.now() - t1;
+  const square = files.stepSquare.replace('.step', '-square.step'); fs.renameSync(files.stepSquare, square); files.stepSquare = square;
+  assert(fetched.length === 3, 'the engine was not fetched again');
+  assert(fs.statSync(files.stepSquare).size < fs.statSync(files.step).size, 'the square-edged file is the smaller one');
+  // contours only: no pockets or holes in the model
+  await dlg.locator('label.check:has-text("Put the pockets and holes in the 3D model") input').uncheck();
+  assert(/Pockets and holes\. Cut them from the 2D vectors/.test(await dlg.innerText()), 'the list says pockets and holes are left out');
+  files.stepPlain = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const plain = files.stepPlain.replace('.step', '-nopockets.step'); fs.renameSync(files.stepPlain, plain); files.stepPlain = plain;
+  // the rolled arm bevel is itself part of a cylinder; holes and pocket corners would add dozens more
+  assert((fs.readFileSync(plain, 'utf8').match(/CYLINDRICAL_SURFACE/g) || []).length <= 1, 'the contours-only model has no hole or corner cylinders');
+  await dlg.locator('label.check:has-text("Put the pockets and holes in the 3D model") input').check();
+  // the 2D vectors for pockets and holes
+  files.cnc = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
+  assert(fs.statSync(files.cnc).size > 5000, 'vector pack has content');
+  assert(fetched.length === 3, 'saving vectors needs no engine');
+  // the same pack in inches
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Inches")').click();
+  assert(/written in inches/.test(await dlg.innerText()), 'the dialog says the files are in inches');
+  files.cncInch = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
+  const inchPack = files.cncInch.replace('.zip', '-inch.zip'); fs.renameSync(files.cncInch, inchPack); files.cncInch = inchPack;
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
+  // STL, for programs that do not read STEP (rolled edges again)
+  await dlg.locator('label.check:has-text("Roll the edge roundovers") input').check();
+  await dlg.locator('.seg[aria-label="File type"] button:has-text("STL")').click();
+  const stlSaid = await dlg.innerText();
+  assert(/within 0\.02 mm of the true surface/.test(stlSaid) && /choose millimeters/.test(stlSaid), 'the STL choice states its facet tolerance and its units');
+  assert(/millimeter STL from here opened in Vectric Aspire 12\.5/.test(stlSaid) && /Nothing has been cut/.test(stlSaid), 'the STL choice says what has and has not been checked');
+  files.stl = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.stl)")').click(), 120000);
+  const stl = fs.readFileSync(files.stl);
+  assert(stl.length === 84 + stl.readUInt32LE(80) * 50 && stl.readUInt32LE(80) > 10000, `binary STL with ${stl.readUInt32LE(80)} facets`);
+  assert(fetched.length === 3, 'the engine was not fetched again for the STL');
+  await page.keyboard.press('Escape'); await settle(300);
+  assert(await dlg.count() === 0, 'Escape closes the dialog');
+  return `STL ${(stl.length / 1e6).toFixed(1)} MB, ${stl.readUInt32LE(80)} facets · rolled ${(fs.statSync(files.step).size / 1024).toFixed(0)} KB in ${(first / 1000).toFixed(1)} s (with the engine fetch) · square ${(fs.statSync(files.stepSquare).size / 1024).toFixed(0)} KB in ${(second / 1000).toFixed(1)} s`;
+});
+
+await step('roundover switches, a binding channel and hole depths for the hardware change the body and what the CNC dialog says', async () => {
+  await tab('Design'); await settle(400);
+  await openSec('body');
+  const weight = async () => { await settle(900); return page.locator('section[data-sec="body"] .note:has-text("Estimated body weight")').innerText(); };
+  const w0 = await weight();
+  await page.locator('section[data-sec="body"] label.check:has-text("Round over the back edge") input').uncheck();
+  assert(await page.locator('#b-rb').count() === 0, 'the back radius field goes away when the roundover is off');
+  const w1 = await weight();
+  assert(w0 !== w1, 'weight changed when the back roundover was switched off');
+  await page.locator('section[data-sec="body"] label.check:has-text("Round over the back edge") input').check();
+  await page.locator('section[data-sec="body"] label.check:has-text("Binding channel around the top edge") input').check();
+  await setField('#bind-w', '2 mm'); await setField('#bind-d', '7 mm');
+  assert(await page.locator('.stage [data-k="binding"]').count() === 1, 'the channel\'s inner edge is drawn');
+  assert(/Left out while the binding channel is on/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the top roundover is left out');
+  const s1 = await state();
+  assert(s1.body.binding.on && Math.abs(s1.body.binding.width - 2) < 1e-6 && Math.abs(s1.body.binding.depth - 7) < 1e-6, 'binding stored');
+  await openSec('bridge');
+  const depthField = page.locator('section[data-sec="bridge"] input[id^="hd-"]').first();
+  const group = (await depthField.getAttribute('id')).slice(3);
+  await setField('#hd-' + group, '12 mm');
+  const s2 = await state();
+  assert(Math.abs(s2.bridge.depths[group] - 12) < 1e-6, 'hole depth stored');
+  await tab('3D'); await settle(1200);
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  const said = await dlg.innerText();
+  assert(/binding channel around the top edge, 2 mm/i.test(said), 'the dialog lists the binding channel: ' + said.slice(0, 80));
+  await page.keyboard.press('Escape');
+  // back to how it was, so later steps see the same body
+  await tab('Design'); await openSec('bridge'); await setField('#hd-' + group, '0');
+  await openSec('body');
+  await page.locator('section[data-sec="body"] label.check:has-text("Binding channel around the top edge") input').uncheck();
+  const s3 = await state();
+  assert(!s3.body.binding.on && !(group in s3.bridge.depths), 'binding off and depth cleared');
+  return `${w0.match(/[\d.]+ lb/)[0]} → ${w1.match(/[\d.]+ lb/)[0]} with the back edge square; binding 2 × 7 mm; ${group} holes 12 mm deep`;
+});
+
+await step('the belly cut is sized with three squares, and the arm bevel can be rolled less, blended, and kept between its squares with a run-out', async () => {
+  await tab('Design'); await settle(400); await openSec('body');
+  const b0 = (await state()).contours.belly;
+  assert(b0.on && b0.angle === 0, 'belly cut is on and parallel to the centerline');
+  const handle = async (i) => { const bb = await page.locator(`.stage [data-k="bevel"][data-id="belly"][data-i="${i}"]`).boundingBox(); return { x: bb.x + bb.width / 2, y: bb.y + bb.height / 2 }; };
+  const drag = async (i, dx, dy) => { const p = await handle(i); await page.mouse.move(p.x, p.y); await page.mouse.down(); for (let k = 1; k <= 6; k++) await page.mouse.move(p.x + (dx * k) / 6, p.y + (dy * k) / 6); await page.mouse.up(); };
+  const v = await view();
+  // the end square, pulled straight up the screen (toward the neck): longer, still parallel to the centerline
+  await drag('l', 0, -20 * v.s);
+  const b1 = (await state()).contours.belly;
+  near(b1.len, b0.len + 40, 1.5, 'length grew by twice the drag'); assert(b1.angle === 0 && Math.abs(b1.reach - b0.reach) < 1e-9, 'it stayed parallel and its reach did not change');
+  // the side square, pulled toward the centerline: wider, same length
+  const toward = b1.x < 0 ? 1 : -1;
+  await drag('w', toward * 15 * v.s, 0);
+  const b2 = (await state()).contours.belly;
+  near(b2.reach, b1.reach + 15, 1, 'reach grew by the drag'); assert(Math.abs(b2.len - b1.len) < 1e-9 && b2.angle === 0, 'length and angle did not change');
+  // the middle square moves the whole bowl
+  await drag('c', 0, 10 * v.s);
+  const b3 = (await state()).contours.belly;
+  near(b3.y, b2.y - 10, 1, 'center moved down'); assert(Math.abs(b3.len - b2.len) < 1e-9 && Math.abs(b3.reach - b2.reach) < 1e-9, 'size kept');
+  // pulling the end square sideways turns the bowl
+  await drag('l', 30 * v.s, 0);
+  const b4 = (await state()).contours.belly;
+  assert(Math.abs(b4.angle) > 0.1, 'the bowl turned: ' + b4.angle);
+  await page.keyboard.press('Control+z'); await settle(300);
+  await setField('#belly-blend', '40 mm');
+  const fresh = (await state()).contours.arm;
+  assert(fresh.roll === 1 && fresh.bounded === false, 'the arm bevel starts fully rolled and runs across the body');
+  assert(await page.locator('#arm-blend').count() === 0 && await page.locator('#arm-fade').count() === 0, 'blend and run-out are not offered where they would do nothing');
+  await setField('#arm-roll', '60'); await setField('#arm-blend', '30 mm');
+  await page.locator('section[data-sec="body"] label.check:has-text("Keep the cut between the two squares") input').check();
+  await setField('#arm-fade', '50 mm');
+  const s = await state();
+  assert(Math.abs(s.contours.belly.blend - 40) < 1e-6 && Math.abs(s.contours.arm.roll - 0.6) < 1e-6 && Math.abs(s.contours.arm.blend - 30) < 1e-6 && s.contours.arm.bounded && Math.abs(s.contours.arm.fade - 50) < 1e-6, 'contour settings stored');
+  assert(/rolls the true radius/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the 3D view shows the rim blend approximately');
+  await tab('3D'); await settle(1500);
+  await page.screenshot({ path: path.join(out, '3d-smooth-contours.png') });
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  const said = await dlg.innerText();
+  assert(/arm bevel, as a curved cut, with its crease rounded, running out to nothing at each end of its line/i.test(said) && /shallow cone with a rounded rim/i.test(said), 'the dialog describes the contours as set');
+  files.stepSmooth = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const smooth = files.stepSmooth.replace('.step', '-smooth.step'); fs.renameSync(files.stepSmooth, smooth); files.stepSmooth = smooth;
+  assert(fs.readFileSync(smooth, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file with the smooth contours saved');
+  await page.keyboard.press('Escape');
+  // back to plain contours for the steps that follow
+  await tab('Design'); await openSec('body');
+  await setField('#arm-fade', '0');
+  await page.locator('section[data-sec="body"] label.check:has-text("Keep the cut between the two squares") input').uncheck();
+  await setField('#arm-blend', '0'); await setField('#arm-roll', '100');
+  return `length ${b0.len.toFixed(0)} → ${b1.len.toFixed(0)} mm, reach ${b1.reach.toFixed(0)} → ${b2.reach.toFixed(0)} mm, turned ${(b4.angle * 180 / Math.PI).toFixed(0)}° then undone; smooth STEP ${(fs.statSync(smooth).size / 1024).toFixed(0)} KB`;
+});
+
+await step('a bevel around the top edge: drag a diamond for width, give a point its own depth, taper to nothing, roll it, add purfling', async () => {
+  await tab('Design'); await settle(400); await openSec('body');
+  const n0 = (await state()).outline;
+  await page.locator('section[data-sec="body"] label.check:has-text("Bevel around the top edge") input').check();
+  await setField('#eb-width', '15 mm'); await setField('#eb-drop', '6 mm');
+  await settle(600);
+  const count = await page.locator('.stage [data-k="edgebevel"]').count();
+  assert(count === (n0.symmetric ? 2 * (n0.nodes.length - 1) : n0.nodes.length), `one diamond for each point of the outline (${count})`);
+  assert(await page.locator('.stage [data-k="edgeline"]').count() === 1, 'the inner line is drawn');
+  assert(/binding channel is left out while this bevel is on/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says what the bevel replaces');
+  // drag the diamond of the lowest outline point 20 mm farther into the body
+  const nodes = n0.nodes, low = nodes.reduce((b, q, k) => (q.y < nodes[b].y ? k : b), 0);
+  const bb = await page.locator(`.stage [data-k="edgebevel"][data-i="${low}"]`).boundingBox();
+  const v = await view(), px = bb.x + bb.width / 2, py = bb.y + bb.height / 2;
+  await page.mouse.move(px, py); await page.mouse.down();
+  for (let k = 1; k <= 6; k++) await page.mouse.move(px, py - (20 * v.s * k) / 6);
+  await page.mouse.up();
+  const s1 = await state();
+  near(s1.outline.nodes[low].bw, 35, 1.5, 'that point is now 15 + 20 mm wide');
+  assert(s1.outline.nodes.filter((q) => q.bw !== undefined).length === 1, 'only that point was changed');
+  // the picked diamond's own width and depth can be typed, and a width of 0 tapers the bevel to nothing there
+  assert(await page.locator(`.stage [data-k="edgebevel"][data-picked="1"]`).count() === 1, 'the dragged diamond is picked');
+  await setField('#eb-pt-d', '10 mm');
+  const other = (low + 3) % nodes.length;
+  await page.locator(`.stage [data-k="edgebevel"][data-i="${other}"]`).click();
+  await setField('#eb-pt-w', '0');
+  const s1b = await state();
+  assert(Math.abs(s1b.outline.nodes[low].bd - 10) < 1e-6 && s1b.outline.nodes[other].bw === 0, 'depth at one point and zero width at another are stored');
+  await setField('#eb-roll', '100');
+  await page.locator('section[data-sec="body"] label.check:has-text("Purfling channel along the inner line") input').check();
+  await settle(500);
+  assert(await page.locator('.stage [data-k="purfling"]').count() >= 1, 'the purfling channel\'s second line is drawn');
+  assert(/not in the saved 3D model/.test(await page.locator('section[data-sec="body"]').innerText()), 'the panel says the channel is not in the 3D model');
+  await tab('3D'); await settle(1500);
+  await page.locator('.viewopts label.check input').uncheck(); await settle(500);
+  await page.screenshot({ path: path.join(out, '3d-edge-bevel.png') });
+  await page.locator('.viewopts label.check input').check();
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  const eSaid = await dlg.innerText();
+  assert(/bevel around the top edge, rolled 100%/i.test(eSaid) && /tapering to nothing/i.test(eSaid), 'the dialog describes the edge bevel');
+  assert(/purfling channel\. It cannot yet be cut reliably into the 3D model/i.test(eSaid), 'the dialog says the purfling channel is not in the 3D file');
+  files.stepEdge = await saveDownload(() => dlg.locator('button:has-text("Save 3D model (.step)")').click(), 120000);
+  const edge = files.stepEdge.replace('.step', '-smooth-edge.step'); fs.renameSync(files.stepEdge, edge); files.stepEdge = edge;
+  assert(fs.readFileSync(edge, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file with the edge bevel saved');
+  await page.keyboard.press('Escape');
+  await tab('Design'); await openSec('body');
+  await page.locator('section[data-sec="body"] button:has-text("Set every point to the general sizes")').click();
+  // (the save to the browser's storage can lag behind a heavy 3D save, so wait for it instead of a fixed pause)
+  let s2 = await state();
+  for (let i = 0; i < 8 && !s2.outline.nodes.every((q) => q.bw === undefined && q.bd === undefined); i++) s2 = await state();
+  assert(s2.outline.nodes.every((q) => q.bw === undefined && q.bd === undefined), 'every point is back to the general sizes');
+  await setField('#eb-roll', '0');
+  await page.locator('section[data-sec="body"] label.check:has-text("Purfling channel along the inner line") input').uncheck();
+  await page.locator('section[data-sec="body"] label.check:has-text("Bevel around the top edge") input').uncheck();
+  return `${count} diamonds; one dragged to ${s1.outline.nodes[low].bw.toFixed(1)} mm; STEP ${(fs.statSync(edge).size / 1024).toFixed(0)} KB`;
+});
+
+await step('the neck: a back from a thickness profile, a headstock redrawn on the drawing, and a 3D model that sits in the pocket', async () => {
+  await tab('Design'); await settle(400); await openSec('neck');
+  const n0len = (await state()).outline.nodes.length;
+  const b0 = (await state()).neck.back;
+  assert(b0.profile === 'standardThin' && Math.abs(b0.t1 - 20.32) < 1e-6, 'starts on the Standard Thin profile, 0.800 in at the 1st fret');
+  await page.selectOption('#nb-profile', 'roundback59');
+  const b1 = (await state()).neck.back;
+  near(b1.t1, 0.86 * 25.4, 1e-6, '1st fret'); near(b1.t12, 0.96 * 25.4, 1e-6, '12th fret');
+  await setField('#nb-t1', '21 mm');
+  assert(await page.locator('#nb-profile').inputValue() === 'own', 'typing a thickness shows it is your own, not the published profile');
+  await page.selectOption('#nb-profile', 'standardThin');
+  await setField('#nb-full', '2.4');
+  const b2 = (await state()).neck.back;
+  assert(Math.abs(b2.t1 - 20.32) < 1e-6 && Math.abs(b2.fullness - 2.4) < 1e-6, `profile restored, fullness stored (1st fret ${b2.t1}, fullness ${b2.fullness}, profile ${b2.profile})`);
+  // a number box that is clicked into and left without typing writes nothing (it once re-applied its old text after a profile was picked)
+  await setField('#nb-t1', '21 mm'); await page.locator('#nb-t1').click(); await page.selectOption('#nb-profile', 'standardThin'); await page.locator('#nb-full').click(); await page.keyboard.press('Escape');
+  const b3 = (await state()).neck.back;
+  assert(Math.abs(b3.t1 - 20.32) < 1e-9 && b3.profile === 'standardThin', `a box left without typing changes nothing (1st fret ${b3.t1})`);
+  const note = await page.locator('section[data-sec="neck"]').innerText();
+  assert(/Not built yet: dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
+  const h0 = (await state()).neck.head;
+  assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
+  await page.locator('section[data-sec="neck"] button:has-text("Reshape the headstock outline")').click();
+  await settle(400);
+  const nut = h0 && (await state()).neck.scale;
+  const count = await page.locator('.stage [data-k="node"]').count();
+  assert(count === 9, `the headstock's nine points are shown (${count})`);
+  const before = (await state()).neck.head.outline.nodes;
+  await dragWorld({ x: before[4].x, y: before[4].y + nut }, { x: before[4].x + 12, y: before[4].y + nut + 25 });
+  const after = (await state()).neck.head.outline.nodes;
+  near(after[4].x, before[4].x + 12, 0.8, 'tip moved across'); near(after[4].y, before[4].y + 25, 0.8, 'tip moved along');
+  // the Smooth / Corner / Delete bar must not sit on the point being adjusted
+  const bar = await page.locator('.stage [data-k="pointbar"]').boundingBox(), dot = await page.locator('.stage [data-k="node"]').nth(4).boundingBox();
+  assert(bar && dot, 'the point bar is shown for the selected point');
+  const cx = dot.x + dot.width / 2, cy = dot.y + dot.height / 2, gapX = Math.max(bar.x - cx, cx - (bar.x + bar.width), 0), gapY = Math.max(bar.y - cy, cy - (bar.y + bar.height), 0);
+  assert(Math.hypot(gapX, gapY) > 60, `the point bar stays clear of the point (${Math.hypot(gapX, gapY).toFixed(0)} px away)`);
+  await dragWorld({ x: before[0].x, y: nut }, { x: before[0].x - 20, y: nut + 15 });
+  const pinned = (await state()).neck.head.outline.nodes;
+  assert(pinned[0].x === before[0].x && pinned[0].y === before[0].y, 'the end at the corner of the nut does not move');
+  assert((await state()).outline.nodes.length === n0len, 'the body outline was not touched');
+  await page.keyboard.press('Escape');
+  // the side view of the back, drawn: points to drag in place of the volute's numbers
+  await page.locator('section[data-sec="neck"] button:has-text("Draw the side view of the back")').click(); await settle(500);
+  const sp = page.locator('.stage [data-k="sidept"]');
+  assert(await page.locator('.stage [data-k="sideview"]').count() === 1 && await sp.count() === 5, 'the side view opens with five points');
+  const side0 = (await state()).neck.head.side;
+  assert(side0.on && side0.points.length === 5 && side0.points[2].s === 0 && side0.points[2].out === 4, 'it starts from the volute as the numbers had it');
+  assert(await page.locator('#hs-vh').count() === 0 && /The side view of the back is drawn/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says the line is in charge and hides the numbers it replaces');
+  const grab = async (i, dx, dy) => { const b = await sp.nth(i).boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await page.mouse.move(b.x + b.width / 2 + dx, b.y + b.height / 2 + dy, { steps: 6 }); await page.mouse.up(); await settle(300); };
+  await grab(2, 0, 30); // the point under the nut, pulled away from the fretboard: more wood
+  const side1 = (await state()).neck.head.side;
+  assert(side1.points[2].out > 5 && Math.abs(side1.points[2].s) < 0.5, `the point under the nut now stands ${side1.points[2].out} mm out`);
+  await grab(0, -40, 40); // an end point slides along the plain line and stays on it
+  const side2 = (await state()).neck.head.side;
+  assert(side2.points[0].s < -42 && side2.points[0].out === 0, 'an end point slides along the plain line and stays on it');
+  await sp.nth(2).click(); await settle(300);
+  const sbar = await page.locator('.stage [data-k="pointbar"]').boundingBox(), sdot = await sp.nth(2).boundingBox();
+  const scx = sdot.x + sdot.width / 2, scy = sdot.y + sdot.height / 2;
+  assert(Math.hypot(Math.max(sbar.x - scx, scx - (sbar.x + sbar.width), 0), Math.max(sbar.y - scy, scy - (sbar.y + sbar.height), 0)) > 60, 'the point bar stays clear of the point here too');
+  // a handle lies along the curve at its point: measured on the picture, past the nut, where the back slopes away
+  await sp.nth(3).click(); await settle(300);
+  const offCurve = await page.evaluate(() => {
+    const d = document.querySelector('[data-k="sideline"]').getAttribute('d').replace(/[ML]/g, ' ').trim().split(/\s+/).map(Number), P = [];
+    for (let i = 0; i < d.length; i += 2) P.push([d[i], d[i + 1]]);
+    return [...document.querySelectorAll('[data-k="sidehandle"]')].map((g) => {
+      const l = g.querySelector('line'), x1 = +l.getAttribute('x1'), y1 = +l.getAttribute('y1'), x2 = +l.getAttribute('x2'), y2 = +l.getAttribute('y2');
+      const dir = x2 > x1 ? 1 : -1, near = (x) => P.reduce((b, q) => (Math.abs(q[0] - x) < Math.abs(b[0] - x) ? q : b)), a = near(x1), q = near(x1 + dir * 4);
+      return Math.abs(Math.atan2((x2 - x1) * (q[1] - a[1]) - (y2 - y1) * (q[0] - a[0]), (x2 - x1) * (q[0] - a[0]) + (y2 - y1) * (q[1] - a[1]))) * 180 / Math.PI;
+    });
+  });
+  assert(offCurve.length === 2 && offCurve.every((a) => a < 6), `each handle lies along the curve at its point (${offCurve.map((a) => a.toFixed(1)).join(' and ')} degrees off)`);
+  await sp.nth(2).click(); await settle(300);
+  // the selected point shows its two handles; dragging one reshapes the curve beside the point
+  const hd2 = page.locator('.stage [data-k="sidehandle"]');
+  assert(await hd2.count() === 2, 'the selected point shows a handle on each side');
+  const hb = await page.locator('.stage [data-k="sidehandle"][data-w="ho"] circle').last().boundingBox();
+  await page.mouse.move(hb.x + hb.width / 2, hb.y + hb.height / 2); await page.mouse.down(); await page.mouse.move(hb.x + hb.width / 2 + 24, hb.y + hb.height / 2 + 30, { steps: 6 }); await page.mouse.up(); await settle(300);
+  const hp = (await state()).neck.head.side.points[2];
+  assert(Array.isArray(hp.ho) && hp.ho[1] > 0.5 && Array.isArray(hp.hi) && hp.hi[1] < -0.2 && Math.abs(hp.hi[0] * hp.ho[1] - hp.hi[1] * hp.ho[0]) < 0.2, `dragging a handle sets it, and the one opposite stays in line with it (${JSON.stringify(hp.ho)} and ${JSON.stringify(hp.hi)})`);
+  assert(hp.s === side2.points[2].s && hp.out === side2.points[2].out, 'the point itself did not move');
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Automatic handles")').click();
+  assert(!(await state()).neck.head.side.points[2].ho, 'Automatic handles hands them back to the app');
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Corner")').click();
+  assert((await state()).neck.head.side.points[2].k === 'c', 'a point can be made a corner, for a peak');
+  const lineBox = await page.locator('.stage [data-k="sideline"]').boundingBox(), pa = await sp.nth(1).boundingBox(), pb = await sp.nth(2).boundingBox();
+  await page.mouse.dblclick((pa.x + pb.x) / 2 + pa.width / 2, (pa.y + pb.y) / 2 + pa.height / 2); await settle(300);
+  assert(lineBox && (await state()).neck.head.side.points.length === 6, 'a double-click adds a point');
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Delete point")').click(); await settle(300);
+  assert((await state()).neck.head.side.points.length === 5, 'and it can be deleted again');
+  await page.locator('.stage button:has-text("Done: back to the drawing")').click(); await settle(300);
+  assert(await page.locator('.stage [data-k="sideview"]').count() === 0, 'Done returns to the drawing');
+  await page.locator('section[data-sec="neck"] button:has-text("Back to the numbers")').click();
+  assert((await state()).neck.head.side.on === false && await page.locator('#hs-vh').count() === 1, 'Back to the numbers switches the drawn line off and brings the numbers back');
+  // a tongue: the flat of the headstock's back carried down the neck
+  await page.locator('section[data-sec="neck"] button:has-text("Tongue")').click();
+  await setField('#hs-cv', '10 mm'); await setField('#hs-vl', '30 mm');
+  await page.locator('section[data-sec="neck"] button:has-text("Pointed")').click();
+  const ht = (await state()).neck.head;
+  assert(ht.voluteStyle === 'tongue' && ht.tongueTip === 'point' && Math.abs(ht.tongueCove - 10) < 1e-6 && Math.abs(ht.voluteLength - 30) < 1e-6, 'tongue, its tip and its cove stored');
+  assert(/The tongue is the flat back of the headstock carried down the back of the neck/.test(await page.locator('section[data-sec="neck"]').innerText()) && await page.locator('#hs-va').count() === 0, 'the panel describes the tongue and hides the volute-only setting');
+  // the tongue's outline, drawn: the first point is the tip, the others give its width
+  await page.locator('section[data-sec="neck"] button:has-text("Draw the tongue’s outline")').click(); await settle(500);
+  const tp = page.locator('.stage [data-k="tonguept"]');
+  assert(await page.locator('.stage [data-k="tongueview"]').count() === 1 && await tp.count() === 3, 'the tongue\'s outline opens with three points');
+  const tl0 = (await state()).neck.head.tongueLine;
+  assert(tl0.on && tl0.points[0].s === -30 && tl0.points[0].w === 0 && tl0.points[0].k === 'c' && tl0.points[2].s === 0, 'it starts from the tongue as the numbers had it: tip 30 mm behind the nut, pointed');
+  assert(await page.locator('#hs-vl').count() === 0, 'the panel hides the tip setting the drawn outline replaces');
+  const pull = async (i, dx, dy) => { const b = await tp.nth(i).boundingBox(); await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2); await page.mouse.down(); await page.mouse.move(b.x + b.width / 2 + dx, b.y + b.height / 2 + dy, { steps: 6 }); await page.mouse.up(); await settle(300); };
+  await pull(1, 0, 20); // the middle point, pulled toward the centerline: narrower there
+  const tl1 = (await state()).neck.head.tongueLine;
+  assert(tl1.points[1].w < tl0.points[1].w - 1.5, `the tongue is narrower where the point was pulled in (${tl0.points[1].w} to ${tl1.points[1].w} mm)`);
+  await pull(0, -30, 25); // the tip slides along the centerline only
+  const tl2 = (await state()).neck.head.tongueLine;
+  assert(tl2.points[0].s < -33 && tl2.points[0].w === 0, 'the tip slides along the centerline and stays on it');
+  await tp.nth(0).click(); await settle(300);
+  await page.locator('.stage [data-k="pointbar"] button:has-text("Round tip")').click();
+  assert((await state()).neck.head.tongueLine.points[0].k === 's', 'the tip can be made round');
+  await page.locator('.stage button:has-text("Done: back to the drawing")').click(); await settle(300);
+  await page.locator('section[data-sec="neck"] button:has-text("Outline back to the numbers")').click();
+  assert((await state()).neck.head.tongueLine.on === false && await page.locator('#hs-vl').count() === 1, 'back to the numbers switches the drawn outline off');
+  // a flat headstock: level with the neck, its face stepped down, with a scoop from the nut
+  await page.locator('section[data-sec="neck"] button:has-text("Flat")').click();
+  await setField('#hs-drop', '6 mm'); await setField('#hs-scoop', '25 mm');
+  const hf = (await state()).neck.head;
+  assert(hf.kind === 'flat' && Math.abs(hf.drop - 6) < 1e-6 && Math.abs(hf.scoop - 25) < 1e-6 && await page.locator('#hs-angle').count() === 0, 'flat, with its face 6 mm down and a 25 mm scoop; the angle setting is hidden');
+  assert(/level with the neck, its face stepped down below the neck’s top/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel describes the flat headstock');
+  await page.locator('section[data-sec="neck"] button:has-text("Angled back")').click();
+  assert((await state()).neck.head.kind === 'angled' && await page.locator('#hs-angle').count() === 1, 'and back to angled');
+  // tuner holes: a layout, then numbers; shown on the drawing and listed in the build checks
+  await page.locator('section[data-sec="neck"] button:has-text("3 a side")').click(); await settle(300);
+  await setField('#tu-hole', '8.73 mm'); await setField('#tu-first', '50 mm');
+  const tu = (await state()).neck.head.tuners;
+  assert(tu.layout === '3+3' && Math.abs(tu.hole - 8.73) < 1e-6 && Math.abs(tu.first - 50) < 1e-6 && tu.pitch === 40 && tu.inFirst === 24 && tu.inLast === 30, 'three a side, with the hole and the first hole\'s place as typed');
+  assert(await page.locator('.stage [data-k="tuner"]').count() === 6, 'six holes are on the drawing');
+  assert(/6 holes, each row on a straight line/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says what the holes are and where they are saved');
+  await settle(1800);
+  const checksText = await page.locator('aside.rail').innerText();
+  assert(/Every tuner hole is inside the headstock/.test(checksText) && /Measure before you cut: tuner hole/.test(checksText), 'the build checks cover the tuner holes');
+  await page.locator('section[data-sec="neck"] button:has-text("Peaked")').click();
+  await setField('#hs-angle', '12'); await setField('#hs-vh', '5 mm'); await setField('#hs-tr', '50 mm'); await setField('#hs-va', '30 mm'); await setField('#hs-vl', '40 mm');
+  const h1 = (await state()).neck.head;
+  assert(h1.angle === 12 && Math.abs(h1.voluteHeight - 5) < 1e-6 && Math.abs(h1.transition - 50) < 1e-6 && Math.abs(h1.voluteAhead - 30) < 1e-6 && h1.voluteStyle === 'peak', 'angle, transition length, volute height, its length toward the headstock and its shape stored');
+  assert(/are one continuous surface/.test(await page.locator('section[data-sec="neck"]').innerText()), 'the panel says how the neck meets the headstock');
+  await tab('3D'); await settle(1500);
+  await page.click('.viewopts button:has-text("Back")'); await settle(600);
+  await page.screenshot({ path: path.join(out, '3d-neck-back.png') });
+  await page.click('.viewopts button:has-text("Angle")');
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
+  assert(/3D model of the neck/i.test(await dlg.innerText()) && /The headstock: .* tilted back 12° from the nut/.test(await dlg.innerText()) && /Not in the file: tuner holes/.test(await dlg.innerText()) && /The volute: peaked, standing out/.test(await dlg.innerText()) && /one continuous surface from the heel to the tip of the headstock/.test(await dlg.innerText()), 'the dialog describes the neck model and what it leaves out');
+  files.neck = await saveDownload(() => dlg.locator('button:has-text("Save neck model (.step)")').click(), 120000);
+  assert(fs.readFileSync(files.neck, 'utf8').startsWith('ISO-10303-21;'), 'a STEP file of the neck saved');
+  fs.writeFileSync(path.join(dl, 'neck-design.json'), JSON.stringify(await state()));
+  // the vector pack again, now that the headstock has tuner holes, for the independent check
+  await dlg.locator('button:has-text("Save CNC vectors (.zip)")').scrollIntoViewIfNeeded();
+  const tunerPack = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
+  fs.renameSync(tunerPack, path.join(dl, 'tuners-cnc-pack.zip'));
+  assert(/third file holds the headstock/.test(await dlg.innerText()) && /its 6 tuner holes/.test(await dlg.innerText()), 'the dialog says the headstock has its own file with the tuner holes'); // the design this neck was saved from, for the independent check
+  await dlg.locator('[data-k="neck-status"]:has-text("neck.step")').waitFor({ timeout: 5000 });
+  await page.keyboard.press('Escape');
+  await tab('Design'); await openSec('neck'); await setField('#nb-full', '2');
+  await page.locator('section[data-sec="neck"] button:has-text("Starting outline")').click();
+  await setField('#hs-angle', '14'); await setField('#hs-vh', '4 mm'); await setField('#hs-tr', '45 mm'); await setField('#hs-va', '25 mm');
+  await page.locator('section[data-sec="neck"] button:has-text("Smooth")').click();
+  return `neck STEP ${(fs.statSync(files.neck).size / 1024).toFixed(0)} KB`;
 });
 
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {

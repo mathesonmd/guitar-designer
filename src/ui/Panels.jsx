@@ -1,13 +1,16 @@
 import React, { useRef } from 'react';
 import { Len, Num, Seg, Check, Row, Acc, Basis } from './widgets.jsx';
 import { NECK_PRESETS, NECK_FIELDS } from '../data/necks.js';
-import { BRIDGES } from '../data/bridges.js';
+import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
-import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis } from '../model/design.js';
-import { setSymmetric } from '../core/path.js';
+import { TUNER_START, TUNER_LAYOUTS } from '../data/neckprofiles.js';
+import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack, makeHeadstock, makeSideLine, makeTongueLine } from '../model/design.js';
+import { NECK_PROFILES, NECK_PROFILE_BASIS } from '../data/neckprofiles.js';
+import { setSymmetric, storedIndex } from '../core/path.js';
 import { fmtWithUnit, fmtLen, unitLabel } from '../core/units.js';
 import { toolOffset, defaultRegHoles } from '../model/templates.js';
+import { bevelPlane, bellyDish } from '../model/solid.js';
 
 const DEG = 180 / Math.PI;
 
@@ -116,6 +119,81 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
           </Row>
         ))}
         <p className="note">Pocket end to scale line: <b className="mono">{fmtWithUnit(g.heelY, u)}</b>. The pocket is cut to the heel’s width and corner radius.</p>
+        {(() => {
+          const b = nk.back, made = g.neck;
+          const setBack = (patch) => change((d) => ({ ...d, neck: { ...d.neck, back: { ...d.neck.back, ...patch } } }));
+          const prof = NECK_PROFILES[b.profile];
+          const own = !prof || Math.abs(prof.t1 - b.t1) > 1e-6 || Math.abs(prof.t12 - b.t12) > 1e-6;
+          const thick = <Basis kind={own ? 'assumed' : NECK_PROFILE_BASIS[0]} text={own ? 'Your own thickness. Measure a neck you like.' : prof.note} src={own ? undefined : NECK_PROFILE_BASIS[1]} />;
+          const guess = (text) => <Basis kind="assumed" text={text} />;
+          return (
+            <>
+              <h4 className="sub">Shape of the neck’s back</h4>
+              <Row label="Thickness profile" wide htmlFor="nb-profile">
+                <select id="nb-profile" value={own ? 'own' : b.profile} onChange={(e) => { if (e.target.value !== 'own') { const p = makeNeckBack(e.target.value); setBack({ profile: p.profile, t1: p.t1, t12: p.t12 }); } }}>
+                  {Object.entries(NECK_PROFILES).map(([k, p]) => <option key={k} value={k}>{p.label}</option>)}
+                  {own && <option value="own">Your own thickness</option>}
+                </select>
+              </Row>
+              <Row label="Thickness at the 1st fret" htmlFor="nb-t1" basis={thick}><Len id="nb-t1" units={u} value={b.t1} min={12} max={35} onChange={(v) => setBack({ t1: v })} /></Row>
+              <Row label="Thickness at the 12th fret" htmlFor="nb-t12" basis={thick}><Len id="nb-t12" units={u} value={b.t12} min={12} max={35} onChange={(v) => setBack({ t12: v })} /></Row>
+              <Row label="Fretboard thickness" htmlFor="nb-board" basis={guess('A starting value with no source. Measure your fretboard at its center. The thicknesses above include the fretboard, so the wood under it is that much thinner.')}><Len id="nb-board" units={u} value={b.board} min={0} max={12} onChange={(v) => setBack({ board: v })} /></Row>
+              <Row label="Fullness of the shoulders" htmlFor="nb-full" basis={guess('A starting value with no source. No maker publishes numbers for the curve of a neck’s back. 2 is a half ellipse; higher fills out the shoulders, lower slims them.')}><Num id="nb-full" value={b.fullness} min={1.2} max={6} step={0.1} digits={1} onChange={(v) => setBack({ fullness: v })} /></Row>
+              <Row label="Blend into the heel" htmlFor="nb-blend" basis={guess('A starting value with no source: the length over which the round back turns into the square heel.')}><Len id="nb-blend" units={u} value={b.blend} min={5} max={150} onChange={(v) => setBack({ blend: v })} /></Row>
+              {made && <p className="note">Wood under the fretboard: <b className="mono">{fmtWithUnit(made.d1, u)}</b> deep at the 1st fret, <b className="mono">{fmtWithUnit(made.d12, u)}</b> at the 12th, and <b className="mono">{fmtWithUnit(made.heelDepth, u)}</b> at the heel (the pocket’s depth plus what stands above the body).</p>}
+              <p className="note">The neck has a flat top where the fretboard is glued. Thickness is held from the nut to the 1st fret, runs straight to the 12th, and is held from there until the back blends into the heel. The neck widens in a straight line from the nut to the pocket’s width where it enters the body.</p>
+              {(() => {
+                const hd = nk.head, shape = g.neck && g.neck.head;
+                const tu = { ...TUNER_START, ...(hd.tuners || {}) }, hasTuners = tu.layout === '3+3' || String(tu.layout) === '6';
+                const setTuners = (patch) => setHead({ tuners: { ...tu, ...patch } });
+                const drawn = !!(hd.side && hd.side.on), outlined = !!(hd.voluteStyle === 'tongue' && hd.tongueLine && hd.tongueLine.on);
+                const setHead = (patch) => change((d) => ({ ...d, neck: { ...d.neck, head: { ...d.neck.head, ...patch } } }));
+                const mine = (text) => <Basis kind="assumed" text={`A starting value with no source. ${text}`} />;
+                return (
+                  <>
+                    <h4 className="sub">Headstock</h4>
+                    <Row label=""><Check checked={!!hd.on} onChange={(v) => setHead({ on: v })}>Headstock</Check></Row>
+                    {hd.on && <Row label="Kind"><Seg value={hd.kind === 'flat' ? 'flat' : 'angled'} onChange={(v) => setHead({ kind: v })} options={[{ value: 'angled', label: 'Angled back' }, { value: 'flat', label: 'Flat' }]} /></Row>}
+                    {hd.on && hd.kind !== 'flat' && <Row label="Angle back from the neck" htmlFor="hs-angle" basis={mine('Set it to the angle you build to.')}><Num id="hs-angle" value={hd.angle} min={1} max={25} step={0.5} digits={1} suffix="°" onChange={(v) => setHead({ angle: v })} /></Row>}
+                    {hd.on && <Row label="Headstock thickness" htmlFor="hs-thick" basis={mine('Measure a headstock you like, or the tuners you will fit.')}><Len id="hs-thick" units={u} value={hd.thickness} min={6} max={30} onChange={(v) => setHead({ thickness: v })} /></Row>}
+                    {hd.on && hd.kind === 'flat' && <Row label="Face below the neck’s top" htmlFor="hs-drop" basis={mine('How far the headstock’s face is below the face the fretboard is glued to. Measure a neck you like.')}><Len id="hs-drop" units={u} value={hd.drop} min={0} max={15} onChange={(v) => setHead({ drop: v })} /></Row>}
+                    {hd.on && hd.kind === 'flat' && <Row label="Scoop length" htmlFor="hs-scoop" basis={mine('The length past the nut over which the face curves down to that level.')}><Len id="hs-scoop" units={u} value={hd.scoop} min={5} max={60} onChange={(v) => setHead({ scoop: v })} /></Row>}
+                    {hd.on && <Row label="Transition length" htmlFor="hs-tr" basis={mine('The length past the nut over which the neck’s round back becomes the headstock’s flat back.')}><Len id="hs-tr" units={u} value={hd.transition} min={20} max={80} onChange={(v) => setHead({ transition: v })} /></Row>}
+                    {hd.on && <Row label="Volute shape"><Seg value={['peak', 'tongue'].includes(hd.voluteStyle) ? hd.voluteStyle : 'smooth'} onChange={(v) => setHead({ voluteStyle: v })} options={[{ value: 'smooth', label: 'Smooth' }, { value: 'peak', label: 'Peaked' }, { value: 'tongue', label: 'Tongue' }]} /></Row>}
+                    {hd.on && !drawn && hd.voluteStyle !== 'tongue' && <Row label="Volute height" htmlFor="hs-vh" basis={mine('How far the volute stands out from the back, on the centerline under the nut. 0 leaves it off.')}><Len id="hs-vh" units={u} value={hd.voluteHeight} min={0} max={15} onChange={(v) => setHead({ voluteHeight: v })} /></Row>}
+                    {hd.on && !drawn && hd.voluteStyle !== 'tongue' && hd.voluteHeight > 0 && <Row label="Volute length toward the heel" htmlFor="hs-vl" basis={mine('How far the volute reaches from the nut down the neck. Longer is a shallower slope for the hand.')}><Len id="hs-vl" units={u} value={hd.voluteLength} min={5} max={120} onChange={(v) => setHead({ voluteLength: v })} /></Row>}
+                    {hd.on && !drawn && hd.voluteStyle !== 'tongue' && hd.voluteHeight > 0 && <Row label="Volute length toward the headstock" htmlFor="hs-va" basis={mine('How far the volute reaches from the nut onto the headstock. Shorter is a steeper slope on that side.')}><Len id="hs-va" units={u} value={hd.voluteAhead} min={5} max={120} onChange={(v) => setHead({ voluteAhead: v })} /></Row>}
+                    {hd.on && !drawn && hd.voluteStyle === 'tongue' && <Row label="Tongue stands out by" htmlFor="hs-vh" basis={mine('How far the flat of the tongue stands out from the crown of the neck’s back, behind the nut. 0 makes it level with the crown.')}><Len id="hs-vh" units={u} value={hd.voluteHeight} min={0} max={15} onChange={(v) => setHead({ voluteHeight: v })} /></Row>}
+                    {hd.on && !drawn && !outlined && hd.voluteStyle === 'tongue' && <Row label="Tongue tip behind the nut" htmlFor="hs-vl" basis={mine('How far down the back of the neck the tip of the tongue reaches, measured from the nut.')}><Len id="hs-vl" units={u} value={hd.voluteLength} min={5} max={120} onChange={(v) => setHead({ voluteLength: v })} /></Row>}
+                    {hd.on && !outlined && hd.voluteStyle === 'tongue' && <Row label="Tongue tip"><Seg value={hd.tongueTip === 'point' ? 'point' : 'round'} onChange={(v) => setHead({ tongueTip: v })} options={[{ value: 'round', label: 'Round' }, { value: 'point', label: 'Pointed' }]} /></Row>}
+                    {hd.on && hd.voluteStyle === 'tongue' && <Row label="Cove width" htmlFor="hs-cv" basis={mine('The width of the hollow that runs from the tongue’s edge out into the neck’s round back.')}><Len id="hs-cv" units={u} value={hd.tongueCove} min={2} max={25} onChange={(v) => setHead({ tongueCove: v })} /></Row>}
+                    {hd.on && <div className="addrow"><button className="btn small" onClick={() => { setSel({ kind: 'outline', of: 'head' }); }}>Reshape the headstock outline</button><button className="btn small" onClick={() => setHead({ outline: makeHeadstock().outline })}>Starting outline</button></div>}
+                    {hd.on && <p className="note">{hd.kind === 'flat' ? 'The headstock is a flat slab level with the neck, its face stepped down below the neck’s top. From the nut the face curves down to that level through a scoop: an arc of a circle seen from the side, straight across, as a sanding drum leaves it. The back of the neck curves down to meet the headstock’s back. The transition is never shorter than the scoop.' : 'The headstock is a flat slab tilted back from the nut.'} Its outline is on the drawing above the nut, laid flat at its true shape: click it and drag its points like the body outline. Its two ends stay on the corners of the nut. The starting outline is only a shape to redraw.{shape ? <> It is <b className="mono">{fmtWithUnit(shape.length, u)}</b> long.</> : null}</p>}
+                    {hd.on && <p className="note">The back of the neck and the back of the headstock are one continuous surface. Seen from the side, the line of the neck’s back bends into the line of the headstock’s back, starting a third of the transition length behind the nut. Past the nut the round back widens and flattens, and by the end of the transition length it is the flat back of the headstock. The headstock’s edges are square to its face: thin at the nut, full thickness where the carve runs out.</p>}
+                    {hd.on && shape && !drawn && <div className="addrow"><button className="btn small" onClick={() => { setHead({ side: { on: true, points: makeSideLine(shape) } }); setSel({ kind: 'side' }); }}>Draw the side view of the back</button></div>}
+                    {hd.on && shape && drawn && <div className="addrow"><button className="btn small" onClick={() => setSel({ kind: 'side' })}>Reshape the side view</button><button className="btn small" onClick={() => { setHead({ side: { ...hd.side, on: false } }); setSel(null); }}>Back to the numbers</button></div>}
+                    {hd.on && shape && shape.tongue && !outlined && <div className="addrow"><button className="btn small" onClick={() => { setHead({ tongueLine: { on: true, points: makeTongueLine(shape) } }); setSel({ kind: 'tongue' }); }}>Draw the tongue’s outline</button></div>}
+                    {hd.on && shape && shape.tongue && outlined && <div className="addrow"><button className="btn small" onClick={() => setSel({ kind: 'tongue' })}>Reshape the tongue’s outline</button><button className="btn small" onClick={() => { setHead({ tongueLine: { ...hd.tongueLine, on: false } }); setSel(null); }}>Outline back to the numbers</button></div>}
+                    {hd.on && outlined && <p className="note">The tongue’s outline is drawn. Its first point is the tip: left smooth it is round, made a corner it is pointed. The other points give half the tongue’s width at each place; the two edges mirror each other. Past the last point the tongue spreads to the headstock’s full width within one and a half cove widths. The tip’s position and shape above are not used while it is drawn.</p>}
+                    {hd.on && drawn && <p className="note">The side view of the back is drawn. The line you drew gives how far the back stands out from its plain line along the centerline, from where it leaves that line behind the nut to where it rejoins it on the headstock. {hd.voluteStyle === 'tongue' ? 'For a tongue it is the height of the tongue’s flat, and its first point is the tongue’s tip.' : 'Away from the centerline it falls off to nothing at the edges of the neck, as the volute does. Make its highest point a corner for a peak; Smooth and Peaked no longer differ.'} The volute’s height and lengths above are not used while it is drawn. The line starts close to the shape the numbers gave, not exactly on it.</p>}
+                    {hd.on && !drawn && hd.voluteStyle !== 'tongue' && <p className="note">The volute is a mound on the crown of the back, highest on the centerline under the nut. It dies away to nothing at the edges of the neck and along a rounded line toward the heel and toward the headstock, and each of those two sides has its own length. Smooth is rounded over the top. Peaked comes to a point. The volute cannot reach past the end of the transition: a longer one is shortened to fit.</p>}
+                    {hd.on && hd.voluteStyle === 'tongue' && <p className="note">The tongue is the flat back of the headstock carried down the back of the neck to a tip, with a crisp edge. {outlined ? 'Its outline is the one you drew; past its last point' : 'At the nut it is four fifths of the nut’s width; past the nut'} it spreads to the headstock’s full width within one and a half cove widths, so the whole back of the headstock is one flat. Outside its edge the surface drops back to the neck’s round back through a cove: upright at the tongue’s edge, running out level into the neck. </p>}
+                    {hd.on && <h4 className="sub">Tuner holes</h4>}
+                    {hd.on && <Row label="Layout"><Seg value={tu.layout === '3+3' ? '3+3' : String(tu.layout) === '6' ? '6' : 'none'} onChange={(v) => setTuners(v === 'none' ? { layout: 'none' } : { layout: v, ...TUNER_LAYOUTS[v] })} options={[{ value: 'none', label: 'None' }, { value: '3+3', label: '3 a side' }, { value: '6', label: '6 in a line' }]} /></Row>}
+                    {hd.on && String(tu.layout) === '6' && <Row label="On the"><Seg value={tu.side === 'treble' ? 'treble' : 'bass'} onChange={(v) => setTuners({ side: v })} options={[{ value: 'bass', label: 'Bass side' }, { value: 'treble', label: 'Treble side' }]} /></Row>}
+                    {hd.on && hasTuners && <Row label="Hole across" htmlFor="tu-hole" basis={mine('Tuner makers publish the hole their tuners need. Set it to that.')}><Len id="tu-hole" units={u} value={tu.hole} min={3} max={16} onChange={(v) => setTuners({ hole: v })} /></Row>}
+                    {hd.on && hasTuners && <Row label="First hole from the nut" htmlFor="tu-first" basis={mine('Measured along the headstock.')}><Len id="tu-first" units={u} value={tu.first} min={10} max={300} onChange={(v) => setTuners({ first: v })} /></Row>}
+                    {hd.on && hasTuners && <Row label="From one hole to the next" htmlFor="tu-pitch" basis={mine('Measured along the headstock. Check it against the bodies of your tuners.')}><Len id="tu-pitch" units={u} value={tu.pitch} min={12} max={80} onChange={(v) => setTuners({ pitch: v })} /></Row>}
+                    {hd.on && hasTuners && <Row label="First hole from the centerline" htmlFor="tu-in1" basis={mine('Set it to suit your outline and string path.')}><Len id="tu-in1" units={u} value={tu.inFirst} min={0} max={90} onChange={(v) => setTuners({ inFirst: v })} /></Row>}
+                    {hd.on && hasTuners && <Row label="Last hole from the centerline" htmlFor="tu-in2" basis={mine('Set it to suit your outline and string path.')}><Len id="tu-in2" units={u} value={tu.inLast} min={0} max={90} onChange={(v) => setTuners({ inLast: v })} /></Row>}
+                    {hd.on && hasTuners && shape && <p className="note">{shape.tuners.length} holes, each row on a straight line from its first hole to its last, right through the headstock and square to its face. {shape.tuners.some((t) => t.gap < 0) ? <b>A hole breaks out of the outline.</b> : <>The hole nearest the edge has <b className="mono">{fmtWithUnit(Math.min(...shape.tuners.map((t) => t.gap)), u)}</b> of wood outside it.</>} They are on the drawing, in the 3D view (as dark plugs), and in the headstock’s own vector file under Save files for CNC. They are not in the 3D model of the neck, and they cannot be dragged on the drawing yet: use these numbers.</p>}
+                    <p className="note"><b>Not built yet:</b> dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the truss rod channel, and the heel’s screw holes.{hd.on ? '' : ' With the headstock off, the neck ends square at the nut.'}</p>
+                  </>
+                );
+              })()}
+            </>
+          );
+        })()}
         <div className="addrow">
           <button className="btn small" onClick={() => fbRef.current.click()}>Load a Fretboard Designer file…</button>
           <input ref={fbRef} type="file" accept=".json,application/json" hidden onChange={(e) => { if (e.target.files[0]) onImportFretboard(e.target.files[0]); e.target.value = ''; }} />
@@ -135,6 +213,26 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
           </Row>
         ))}
         {bdef.placementNote && <p className="note">{bdef.placementNote}</p>}
+        {(() => {
+          const groups = [...new Set(g.holes.map((h) => h.depthGroup).filter(Boolean))];
+          if (!groups.length) return null;
+          const depths = design.bridge.depths || {};
+          const setDepth = (k, v) => change((d) => {
+            const next = { ...(d.bridge.depths || {}) };
+            if (v > 0) next[k] = v; else delete next[k];
+            return { ...d, bridge: { ...d.bridge, depths: next } };
+          });
+          return (
+            <>
+              {groups.map((k) => (
+                <Row key={k} label={`${HOLE_DEPTH_GROUPS[k]}: depth`} htmlFor={`hd-${k}`}>
+                  <Len id={`hd-${k}`} units={u} value={depths[k] || 0} min={0} max={design.body.thickness} onChange={(v) => setDepth(k, v)} />
+                </Row>
+              ))}
+              <p className="note">Hole depths depend on the hardware you bought, so none is filled in. Measure your part and enter the depth. While a depth is 0 the hole is marked but not drilled in the 3D model, and its CNC layer says “depth to suit”.</p>
+            </>
+          );
+        })()}
         <Row label="Treble compensation" htmlFor="comp-t" basis={<Basis kind="assumed" text="How far behind the scale line the high-E saddle ends up. 0.030 in is the Fretboard Designer’s starting value; real intonation depends on strings and action." src="fretboardDesigner" />}>
           <Len id="comp-t" units={u} value={design.compensation.treble} min={0} max={15} onChange={(v) => set('compensation', { treble: v })} />
         </Row>
@@ -232,8 +330,63 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
 
       <Acc id="body" title="Body" hint={`${fmtLen(design.body.thickness, u)} ${unitLabel(u)} thick`}>
         <Row label="Thickness" htmlFor="b-thick" basis={<Basis kind="assumed" text="1-3/4 in is the usual solid-body blank. Set this to your blank." />}><Len id="b-thick" units={u} value={design.body.thickness} min={15} max={80} onChange={(v) => set('body', { thickness: v })} /></Row>
-        <Row label="Edge roundover, top" htmlFor="b-rt"><Len id="b-rt" units={u} value={design.body.roundTop} min={0} max={25} onChange={(v) => set('body', { roundTop: v })} /></Row>
-        <Row label="Edge roundover, back" htmlFor="b-rb"><Len id="b-rb" units={u} value={design.body.roundBack} min={0} max={25} onChange={(v) => set('body', { roundBack: v })} /></Row>
+        {(() => {
+          const bd = design.body.binding, topOn = design.body.roundTopOn !== false, backOn = design.body.roundBackOn !== false;
+          const setB = (patch) => set('body', { binding: { ...bd, ...patch } });
+          const size = <Basis kind="assumed" text="A starting size only. Binding strip comes in many sizes: measure the strip you have. Its thickness is the channel’s width and its height is the channel’s depth." />;
+          return (
+            <>
+              <Row label=""><Check checked={topOn} onChange={(v) => set('body', { roundTopOn: v })}>Round over the top edge</Check></Row>
+              {topOn && <Row label="Top roundover radius" htmlFor="b-rt"><Len id="b-rt" units={u} value={design.body.roundTop} min={0} max={25} onChange={(v) => set('body', { roundTop: v })} /></Row>}
+              {topOn && bd.on && <p className="note">Left out while the binding channel is on: the channel takes the top edge.</p>}
+              <Row label=""><Check checked={backOn} onChange={(v) => set('body', { roundBackOn: v })}>Round over the back edge</Check></Row>
+              {backOn && <Row label="Back roundover radius" htmlFor="b-rb"><Len id="b-rb" units={u} value={design.body.roundBack} min={0} max={25} onChange={(v) => set('body', { roundBack: v })} /></Row>}
+              {(() => {
+                const eb = design.body.edgeBevel, made = g.bevelEdge;
+                const setE = (patch) => set('body', { edgeBevel: { ...eb, ...patch } });
+                const start = <Basis kind="assumed" text="A starting size only. This bevel is shaped by eye: set these to what you want to carve." />;
+                const strip = <Basis kind="assumed" text="A starting size only. Purfling strip comes in many sizes: measure the strip you have." />;
+                const narrow = made ? made.handles.filter((h) => h.width < h.asked - 0.05).length : 0;
+                const shallow = made ? made.handles.filter((h) => h.depth < h.askedDepth - 0.05).length : 0;
+                // the outline point whose diamond is picked on the drawing
+                const j = sel && sel.kind === 'edgebevel' && eb.on ? storedIndex(design.outline, sel.i) : -1;
+                const node = j >= 0 ? design.outline.nodes[j] : null;
+                const setNode = (patch) => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map((q, k) => (k === j ? { ...q, ...patch } : q)) } }));
+                const clear = (q) => { const { bw, bd: depthHere, ...rest } = q; return rest; };
+                return (
+                  <>
+                    <Row label=""><Check checked={eb.on} onChange={(v) => setE({ on: v })}>Bevel around the top edge</Check></Row>
+                    {eb.on && <Row label="Width" htmlFor="eb-width" basis={start}><Len id="eb-width" units={u} value={eb.width} min={0} max={150} onChange={(v) => setE({ width: v })} /></Row>}
+                    {eb.on && <Row label="Depth at the body edge" htmlFor="eb-drop" basis={start}><Len id="eb-drop" units={u} value={eb.drop} min={0} max={design.body.thickness - 3} onChange={(v) => setE({ drop: v })} /></Row>}
+                    {eb.on && <Row label="How far the bevel is rolled" htmlFor="eb-roll"><Num id="eb-roll" value={Math.round((eb.roll || 0) * 100)} min={0} max={100} step={5} suffix="%" onChange={(v) => setE({ roll: v / 100 })} /></Row>}
+                    {eb.on && <p className="note">A bevel from an inner line on the top down to the body edge. The width and depth above apply all the way around until you change a point: every point of the outline has a brass diamond on the inner line. Drag a diamond to set how wide the bevel is there, or click it to give that point its own width and depth below. Add a point to the outline to get another diamond.</p>}
+                    {eb.on && <p className="note"><b>To make the bevel taper to nothing</b>, drag a diamond onto the outline or set that point’s width to 0. The bevel then narrows to a point there, from full size at the points either side. <b>Rolled 0%</b> the bevel is flat. <b>100%</b> it is a smooth curve that leaves the top almost level (at a tenth of the flat bevel’s slope, so there is the faintest crease) and steepens toward the edge.</p>}
+                    {node && (
+                      <div className="card sel" data-k="eb-point">
+                        <Row label="This point: width" htmlFor="eb-pt-w"><Len id="eb-pt-w" units={u} value={node.bw !== undefined ? node.bw : eb.width} min={0} max={150} onChange={(v) => setNode({ bw: v })} /></Row>
+                        <Row label="This point: depth at the edge" htmlFor="eb-pt-d"><Len id="eb-pt-d" units={u} value={node.bd !== undefined ? node.bd : eb.drop} min={0} max={design.body.thickness - 3} onChange={(v) => setNode({ bd: v })} /></Row>
+                        <Row label=""><button className="btn small" onClick={() => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map((q, k) => (k === j ? clear(q) : q)) } }))}>Use the general sizes at this point</button></Row>
+                      </div>
+                    )}
+                    {eb.on && <Row label=""><button className="btn small" onClick={() => change((d) => ({ ...d, outline: { ...d.outline, nodes: d.outline.nodes.map(clear) } }))}>Set every point to the general sizes</button></Row>}
+                    {eb.on && narrow > 0 && <p className="note">At {narrow} {narrow === 1 ? 'point' : 'points'} the bevel is held narrower than asked, because the body has no room for more there (a horn tip, a corner or a tight curve).</p>}
+                    {eb.on && shallow > 0 && <p className="note">At {shallow} {shallow === 1 ? 'point' : 'points'} the depth is held to three times the width there, so the bevel is never steeper than that.</p>}
+                    {eb.on && made && made.crosses && <p className="note" style={{ color: 'var(--torch)' }}>The inner line crosses itself. Make the bevel narrower where the outline turns tightly; it cannot be cut as drawn.</p>}
+                    {eb.on && <Row label=""><Check checked={!!eb.purfling} onChange={(v) => setE({ purfling: v })}>Purfling channel along the inner line</Check></Row>}
+                    {eb.on && eb.purfling && <Row label="Purfling width" htmlFor="pf-w" basis={strip}><Len id="pf-w" units={u} value={eb.purflingWidth} min={0.3} max={10} onChange={(v) => setE({ purflingWidth: v })} /></Row>}
+                    {eb.on && eb.purfling && <Row label="Purfling depth" htmlFor="pf-d" basis={strip}><Len id="pf-d" units={u} value={eb.purflingDepth} min={0.3} max={design.body.thickness - 3} onChange={(v) => setE({ purflingDepth: v })} /></Row>}
+                    {eb.on && eb.purfling && <p className="note">A narrow groove in the top, between the bevel’s inner line and the dashed line just inside it. It follows the inner line all the way around, including along the body edge where the bevel has tapered to nothing. It is in the 3D view and the CNC vectors, to cut as a 2D channel. It is not in the saved 3D model.</p>}
+                    {eb.on && <p className="note">Where the bevel is cut, it takes the top edge; where it has tapered to nothing, the top roundover is still there. The binding channel is left out while this bevel is on. The bevel is in the 3D view, the 3D model and the CNC vectors. It is not on the routing templates.</p>}
+                  </>
+                );
+              })()}
+              <Row label=""><Check checked={bd.on} onChange={(v) => setB({ on: v })}>Binding channel around the top edge</Check></Row>
+              {bd.on && <Row label="Channel width" htmlFor="bind-w" basis={size}><Len id="bind-w" units={u} value={bd.width} min={0.5} max={10} onChange={(v) => setB({ width: v })} /></Row>}
+              {bd.on && <Row label="Channel depth" htmlFor="bind-d" basis={size}><Len id="bind-d" units={u} value={bd.depth} min={0.5} max={design.body.thickness - 3} onChange={(v) => setB({ depth: v })} /></Row>}
+              {bd.on && <p className="note">A square ledge all the way around the top, set in from the body outline by its width. It is in the 3D view, the 3D model and the CNC vectors. It is not on the routing templates.</p>}
+            </>
+          );
+        })()}
         <Row label="Wood" htmlFor="b-wood" basis={<Basis kind="published" text="Average dried weight from The Wood Database. Individual boards vary a lot; weigh yours if the number matters." src="woodDb" />}>
           <select id="b-wood" value={design.body.wood} onChange={(e) => set('body', { wood: e.target.value })}>{Object.entries(WOODS).map(([k, w]) => <option key={k} value={k}>{w.label}{w.lbft3 ? ` · ${w.lbft3} lb/ft³` : ''}</option>)}</select>
         </Row>
@@ -246,11 +399,30 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
             <>
               <Row label=""><Check checked={a.on} onChange={(v) => setC('arm', { on: v })}>Arm bevel on the top</Check></Row>
               {a.on && <Row label="Depth at the body edge" htmlFor="arm-drop" basis={start}><Len id="arm-drop" units={u} value={a.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('arm', { drop: v })} /></Row>}
-              {a.on && <p className="note">A flat cut between the two blue squares on the drawing, deepening toward the edge. Drag the squares to place it.</p>}
+              {a.on && (() => {
+                const made = bevelPlane(a, g.outline, g.centroid, design.body.thickness - 3);
+                const rollNow = made ? Math.round(made.roll * 100) : 0;
+                return (
+                  <>
+                    <Row label="How far the cut is rolled" htmlFor="arm-roll"><Num id="arm-roll" value={rollNow} min={0} max={100} step={5} suffix="%" onChange={(v) => setC('arm', { roll: v / 100 })} /></Row>
+                    {rollNow < 100 && <Row label="Blend where it meets the top" htmlFor="arm-blend"><Len id="arm-blend" units={u} value={a.blend || 0} min={0} max={2000} onChange={(v) => setC('arm', { blend: v })} /></Row>}
+                    <Row label=""><Check checked={!!a.bounded} onChange={(v) => setC('arm', { bounded: v })}>Keep the cut between the two squares</Check></Row>
+                    {a.bounded && <Row label="Run-out at each end" htmlFor="arm-fade"><Len id="arm-fade" units={u} value={a.fade || 0} min={0} max={500} onChange={(v) => setC('arm', { fade: v })} /></Row>}
+                    <p className="note">The shape a wide flat sander leaves when the body is held against it and rolled: straight along the dashed line, curved across it. The line runs through the two blue squares{a.bounded ? ', and the cut stops at them' : ' and on across the body'}. Drag the squares to place it.</p>
+                    <p className="note"><b>Rolled 100%</b> the cut leaves the top with no crease. <b>0%</b> is a flat cut with a crease{rollNow < 100 ? <>, which <b>Blend</b> rounds to a radius{made && (a.blend || 0) > made.blend + 1e-6 ? <> (held to {fmtWithUnit(made.blend, u)} here, the most that fits)</> : null}</> : null}.{a.bounded ? <> <b>Run-out</b> is the length at each end over which the cut rises and fades to nothing; at 0 it stops square{made && (a.fade || 0) > made.fade + 1e-6 ? <> (held to {fmtWithUnit(made.fade, u)}, half the line)</> : null}.</> : null}</p>
+                  </>
+                );
+              })()}
               <Row label=""><Check checked={b.on} onChange={(v) => setC('belly', { on: v })}>Belly cut on the back</Check></Row>
-              {b.on && <Row label="Depth at the body edge" htmlFor="belly-drop" basis={start}><Len id="belly-drop" units={u} value={b.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('belly', { drop: v })} /></Row>}
-              {b.on && <Row label="Length along the edge" htmlFor="belly-len" basis={start}><Len id="belly-len" units={u} value={b.len} min={20} max={400} onChange={(v) => setC('belly', { len: v })} /></Row>}
-              {b.on && <p className="note">A shallow dish. Drag one blue square to the deepest point on the body edge and the other to where the cut fades out.</p>}
+              {b.on && <Row label="Depth at its center" htmlFor="belly-drop" basis={start}><Len id="belly-drop" units={u} value={b.drop} min={1} max={design.body.thickness - 3} onChange={(v) => setC('belly', { drop: v })} /></Row>}
+              {b.on && <Row label="Length" htmlFor="belly-len" basis={start}><Len id="belly-len" units={u} value={b.len} min={20} max={500} onChange={(v) => setC('belly', { len: v })} /></Row>}
+              {b.on && <Row label="Reach into the body" htmlFor="belly-reach" basis={start}><Len id="belly-reach" units={u} value={b.reach} min={5} max={300} onChange={(v) => setC('belly', { reach: v })} /></Row>}
+              {b.on && <Row label="Turned from the centerline" htmlFor="belly-angle"><Num id="belly-angle" value={Math.round(((b.angle || 0) * 180) / Math.PI * 10) / 10} min={-90} max={90} step={1} digits={1} suffix="°" onChange={(v) => setC('belly', { angle: (v * Math.PI) / 180 })} /></Row>}
+              {b.on && <Row label="Blend at the rim" htmlFor="belly-blend" basis={<Basis kind="assumed" text="A starting size for the short smooth transition where the cut meets the back. Set it to what you want to carve." />}><Len id="belly-blend" units={u} value={b.blend || 0} min={0} max={2000} onChange={(v) => setC('belly', { blend: v })} /></Row>}
+              {b.on && (() => {
+                const made = bellyDish(b, design.body.thickness - 3);
+                return <p className="note">A wide, short cone taken out of the back: deepest at the middle blue square and rising in a straight slope to its rim. Put the middle square on the body edge. Drag the square at the end of the cut to lengthen it, or to turn it; its length starts parallel to the centerline. Drag the square at its side to widen it. <b>Blend</b> is the radius of the short smooth transition where the cone meets the back{made && (b.blend || 0) > made.blend + 1e-6 ? <>; it is held to {fmtWithUnit(made.blend, u)} here, the most this cut takes</> : null}.{made && made.blend > 0 ? ' The 3D view shows the blended rim closely but not exactly; the saved 3D model rolls the true radius.' : ''}</p>;
+              })()}
               {(a.on || b.on) && <p className="note">Contours are carved by hand. The templates carry the guide lines and the depths to work to.</p>}
             </>
           );

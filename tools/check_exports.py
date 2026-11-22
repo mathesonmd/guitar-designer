@@ -7,6 +7,12 @@
 # It checks the zip, that holes are true circles at their stated diameters, that openings match the
 # published cavity sizes, that the neck pocket walls are one heel width apart, that the SVG and DXF
 # trace the same curves, and (when poppler's pdfinfo is installed) the PDF page count and paper size.
+# For the 3D model it reads the STEP text with its own reader: units, one closed solid, the back at
+# height 0 and the top at the body thickness, a true cylinder for every through hole where the design
+# puts it, the neck pocket's corner cylinders, and a flat floor at each pocket's depth. When the gmsh
+# Python package is installed it also opens the file with gmsh's STEP importer and measures it.
+# For the STL it reads the binary file itself: every facet edge has a partner (no gaps), the mesh is the
+# outline's true size and the body's thickness, and its volume matches what gmsh measured in the STEP.
 import sys, os, zipfile, json, math, re
 D = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'test-output', 'downloads')
 IN = 25.4
@@ -204,5 +210,238 @@ for paper, (pw, ph) in (('letter', (612.0, 792.0)), ('a4', (595.28, 841.89))) if
     pages = int(re.search(r'Pages:\s+(\d+)', info).group(1)) if info else -1
     size = re.search(r'Page size:\s+([\d.]+) x ([\d.]+) pts', info)
     check(pages >= 6 and size and abs(float(size.group(1)) - pw) < 0.5 and abs(float(size.group(2)) - ph) < 0.5, '%s PDF: %d pages of %s x %s pt' % (paper, pages, size.group(1) if size else '?', size.group(2) if size else '?'))
+# ---------- STEP (3D model of the body) ----------
+def parse_step(text):
+    body = text[text.index('DATA;') + 5:text.rindex('ENDSEC;')]
+    ents = {}
+    for m in re.finditer(r'#(\d+)\s*=\s*(.*?);\s*(?=#\d+\s*=|$)', body, re.S):
+        raw = ' '.join(m.group(2).split())
+        k = re.match(r'([A-Z0-9_]+)\s*\((.*)\)$', raw)
+        ents[int(m.group(1))] = (k.group(1), k.group(2)) if k else ('COMPLEX', raw)
+    return ents
+def refs(a): return [int(x) for x in re.findall(r'#(\d+)', a)]
+def nums(a): return [float(x) for x in re.findall(r'[-+]?\d+\.\d*(?:[eE][-+]?\d+)?', a)]
+def step_report(path, rolled):
+    text = open(path).read()
+    E = parse_step(text)
+    kinds = {}
+    for k, _ in E.values(): kinds[k] = kinds.get(k, 0) + 1
+    print('STEP', os.path.basename(path), len(E), 'entities;', {k: kinds.get(k, 0) for k in ('PLANE', 'CYLINDRICAL_SURFACE', 'B_SPLINE_SURFACE_WITH_KNOTS', 'TOROIDAL_SURFACE', 'ADVANCED_FACE')})
+    check(text.startswith('ISO-10303-21;') and re.search(r'SI_UNIT\s*\(\s*\.MILLI\.\s*,\s*\.METRE\.\s*\)', text) is not None, 'a STEP file in millimeters')
+    check(kinds.get('MANIFOLD_SOLID_BREP', 0) == 1 and kinds.get('CLOSED_SHELL', 0) == 1, 'one solid with one closed skin')
+    pt = lambda i: nums(E[i][1])[-3:]
+    def placement(i):  # AXIS2_PLACEMENT_3D -> (origin, axis direction)
+        r = refs(E[i][1]); return pt(r[0]), (pt(r[1]) if len(r) > 1 else [0.0, 0.0, 1.0])
+    T = design['body']['thickness']
+    vz = [pt(refs(a)[0])[2] for k, a in E.values() if k == 'VERTEX_POINT']
+    check(abs(min(vz)) < 1e-6 and abs(max(vz) - T) < 1e-6, 'back face at height 0, top face at %.3f mm (corners span %.4f to %.4f)' % (T, min(vz), max(vz)))
+    cyl = []
+    for k, a in E.values():
+        if k == 'CYLINDRICAL_SURFACE':
+            o, ax = placement(refs(a)[0]); cyl.append((o, ax, nums(a.split(',')[-1])[0]))
+    upright = [(o, r) for o, ax, r in cyl if abs(abs(ax[2]) - 1) < 1e-9]
+    def has_cyl(x, y, r): return any(abs(o[0] - x) < 1e-4 and abs(o[1] - y) < 1e-4 and abs(rr - r) < 1e-6 for o, rr in upright)
+    nk = design['neck']
+    heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
+    screws = [(sx, sy) for sy in (s0, s0 + nk['screwAlong']) for sx in (-sa, sa)]
+    check(all(has_cyl(x, y, nk['screwBodyHole'] / 2) for x, y in screws), 'four neck screw holes are true cylinders, %.2f mm across, where the neck numbers put them' % nk['screwBodyHole'])
+    check(all(has_cyl(c['x'], c['y'], c['d'] / 2) for c in design['controls']), '%d control holes are true cylinders at their places and sizes' % len(design['controls']))
+    R = nk['heelCornerR']; hw = nk['heelWidth'] / 2
+    if R > 0.05: check(has_cyl(-(hw - R), heel + R, R) and has_cyl(hw - R, heel + R, R), 'neck pocket corners are true %.3f mm arcs, one heel width (%.3f mm) apart' % (R, 2 * hw))
+    floors = []
+    for k, a in E.values():
+        if k == 'PLANE':
+            o, ax = placement(refs(a)[0])
+            if abs(abs(ax[2]) - 1) < 1e-9: floors.append(o[2])
+    want = [('neck pocket', T - nk['pocketDepth'])] + [('pickup cavity', T - p['depth']) for p in design['pickups']] + [(c['name'], c['depth'] if c['side'] == 'back' else T - c['depth']) for c in design['cavities']]
+    miss = [n for n, zf in want if not any(abs(f - zf) < 1e-6 for f in floors)]
+    check(not miss, 'a flat, level floor at the stated depth of every pocket (%d pockets)%s' % (len(want), '' if not miss else ': missing ' + ', '.join(miss)))
+    curved = kinds.get('B_SPLINE_SURFACE_WITH_KNOTS', 0) + kinds.get('TOROIDAL_SURFACE', 0)
+    return curved
+steps = sorted(f for f in glob.glob(D + '/*-body-*.step') if 'nopockets' not in f and 'smooth' not in f)
+for f in glob.glob(D + '/*-body-nopockets.step'):
+    bare = parse_step(open(f).read()); bk = [k for k, _ in bare.values()]
+    print('STEP', os.path.basename(f), len(bare), 'entities')
+    def upright(a):
+        r = refs(bare[refs(a)[0]][1]); ax = nums(bare[r[1]][1])[-3:] if len(r) > 1 else [0.0, 0.0, 1.0]
+        return abs(abs(ax[2]) - 1) < 1e-9
+    stand = sum(1 for k, a in bare.values() if k == 'CYLINDRICAL_SURFACE' and upright(a))
+    check(bk.count('MANIFOLD_SOLID_BREP') == 1 and stand == 0, 'the contours-only model is one solid with no holes or pocket corners in it (no upright cylinders; a rolled arm bevel is a cylinder lying on its side)')
+if not steps: print('  skip STEP checks: no 3D model was saved')
+else:
+    curved = {('rolled' if 'rolled' in f else 'square'): step_report(f, 'rolled' in f) for f in steps}
+    if len(curved) == 2: check(curved['rolled'] > curved['square'], 'the rolled-edge file carries the roundover surfaces the square-edged file lacks (%d against %d curved faces)' % (curved['rolled'], curved['square']))
+    gmsh_volume = {}
+    try:
+        import gmsh
+    except Exception:
+        gmsh = None; print('  skip the gmsh measurement: the gmsh Python package is not installed (or cannot load)')
+    if gmsh:
+        # the outline's true extent, from the design's own Bezier points
+        nodes = design['outline']['nodes']
+        if design['outline'].get('symmetric'):
+            nodes = nodes + [dict(n, x=-n['x'], ix=-n['ox'], ox=-n['ix'], iy=n['oy'], oy=n['iy']) for n in reversed(nodes[1:-1])]
+            nodes[0] = dict(nodes[0], x=0, ix=-nodes[0]['ox'], iy=nodes[0]['oy'])
+            m = len(design['outline']['nodes']) - 1; nodes[m] = dict(nodes[m], x=0, ox=-nodes[m]['ix'], oy=nodes[m]['iy'])
+        xs, ys = [], []
+        for i, a in enumerate(nodes):
+            b = nodes[(i + 1) % len(nodes)]
+            P = [(a['x'], a['y']), (a['x'] + a['ox'], a['y'] + a['oy']), (b['x'] + b['ix'], b['y'] + b['iy']), (b['x'], b['y'])]
+            for j in range(2001):
+                t = j / 2000.0; u = 1 - t
+                xs.append(u ** 3 * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t ** 3 * P[3][0])
+                ys.append(u ** 3 * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t ** 3 * P[3][1])
+        sq = [f for f in steps if 'square' in f]
+        for f in steps:
+            gmsh.initialize(); gmsh.option.setNumber('General.Terminal', 0)
+            gmsh.model.occ.importShapes(f); gmsh.model.occ.synchronize()
+            vols = gmsh.model.getEntities(3)
+            check(len(vols) == 1, 'gmsh opens %s as one solid' % os.path.basename(f))
+            bb = gmsh.model.getBoundingBox(*vols[0]); vol = gmsh.model.occ.getMass(*vols[0])
+            gmsh.finalize()
+            gmsh_volume['square' if 'square' in f else 'rolled'] = vol
+            T = design['body']['thickness']
+            contours = design['contours']['arm']['on'] or design['contours']['belly']['on']
+            print('  gmsh: volume %.0f mm^3, box x %.3f to %.3f, y %.3f to %.3f, z %.3f to %.3f' % (vol, bb[0], bb[3], bb[1], bb[4], bb[2], bb[5]))
+            if f not in (sq or steps)[:1]: continue
+            if contours: print('  (with an arm bevel or belly cut, gmsh reports a loose box around their curved faces, so only the volume is checked)')
+            else: check(abs(bb[0] - min(xs)) < 0.01 and abs(bb[3] - max(xs)) < 0.01 and abs(bb[1] - min(ys)) < 0.01 and abs(bb[4] - max(ys)) < 0.01 and abs(bb[2]) < 0.01 and abs(bb[5] - T) < 0.01, 'gmsh measures the model at the outline\'s true size and the body thickness')
+            check(0.5 * (max(xs) - min(xs)) * (max(ys) - min(ys)) * T < vol < (max(xs) - min(xs)) * (max(ys) - min(ys)) * T, 'gmsh volume is a believable share of the blank (%.0f%%)' % (100 * vol / ((max(xs) - min(xs)) * (max(ys) - min(ys)) * T)))
+# ---------- STL (3D model of the body as a mesh) ----------
+import struct
+stls = glob.glob(D + '/*-body.stl')
+if not stls: print('  skip STL checks: no STL was saved')
+for f in stls:
+    raw = open(f, 'rb').read()
+    n = struct.unpack_from('<I', raw, 80)[0]
+    print('STL', os.path.basename(f), n, 'facets, %.1f MB' % (len(raw) / 1e6))
+    check(len(raw) == 84 + 50 * n and not raw[:5] == b'solid', 'a well-formed binary STL')
+    edges = {}; vol = 0.0; lo = [1e9] * 3; hi = [-1e9] * 3
+    for i in range(n):
+        v = struct.unpack_from('<9f', raw, 84 + 50 * i + 12)
+        a, b, c = v[0:3], v[3:6], v[6:9]
+        vol += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6
+        for p in (a, b, c):
+            for k in range(3):
+                if p[k] < lo[k]: lo[k] = p[k]
+                if p[k] > hi[k]: hi[k] = p[k]
+        for p, q in ((a, b), (b, c), (c, a)):
+            if edges.get((q, p), 0) > 0:
+                edges[(q, p)] -= 1
+                if edges[(q, p)] == 0: del edges[(q, p)]
+            else: edges[(p, q)] = edges.get((p, q), 0) + 1
+    check(len(edges) == 0, 'the mesh is closed: every facet edge is shared with one neighbor (%d without)' % len(edges))
+    T = design['body']['thickness']
+    onodes = design['outline']['nodes']
+    if design['outline'].get('symmetric'):
+        m = len(onodes) - 1
+        full = [dict(onodes[0], x=0, ix=-onodes[0]['ox'], iy=onodes[0]['oy'])] + onodes[1:m] + [dict(onodes[m], x=0, ox=-onodes[m]['ix'], oy=onodes[m]['iy'])]
+        onodes = full + [dict(q, x=-q['x'], ix=-q['ox'], ox=-q['ix'], iy=q['oy'], oy=q['iy']) for q in reversed(full[1:m])]
+    ex, ey = [], []
+    for i, a in enumerate(onodes):
+        b = onodes[(i + 1) % len(onodes)]
+        P = [(a['x'], a['y']), (a['x'] + a['ox'], a['y'] + a['oy']), (b['x'] + b['ix'], b['y'] + b['iy']), (b['x'], b['y'])]
+        for j in range(2001):
+            t = j / 2000.0; u = 1 - t
+            ex.append(u ** 3 * P[0][0] + 3 * u * u * t * P[1][0] + 3 * u * t * t * P[2][0] + t ** 3 * P[3][0])
+            ey.append(u ** 3 * P[0][1] + 3 * u * u * t * P[1][1] + 3 * u * t * t * P[2][1] + t ** 3 * P[3][1])
+    check(abs(lo[0] - min(ex)) < 0.05 and abs(hi[0] - max(ex)) < 0.05 and abs(lo[1] - min(ey)) < 0.05 and abs(hi[1] - max(ey)) < 0.05, 'the mesh is the outline\'s true size: %.2f x %.2f mm (outline %.2f x %.2f)' % (hi[0] - lo[0], hi[1] - lo[1], max(ex) - min(ex), max(ey) - min(ey)))
+    check(abs(lo[2]) < 1e-4 and abs(hi[2] - T) < 1e-4, 'back at height 0, top at %.3f mm' % T)
+    if steps and gmsh_volume.get('rolled'): check(abs(vol / gmsh_volume['rolled'] - 1) < 1e-4, 'mesh volume %.0f mm^3 matches the STEP solid as gmsh measures it (%.0f), within %.4f%%' % (vol, gmsh_volume['rolled'], abs(vol / gmsh_volume['rolled'] - 1) * 100))
+    else: print('  mesh volume %.0f mm^3 (no gmsh measurement of the STEP to compare with)' % vol)
+# ---------- CNC vectors (pockets and holes at true position) ----------
+packs = glob.glob(D + '/*-cnc-vectors.zip')
+if not packs: print('  skip CNC vector checks: no vector pack was saved')
+for f in packs:
+    cz = zipfile.ZipFile(f); cn = cz.namelist()
+    print('CNC', os.path.basename(f), cn)
+    check(cz.testzip() is None and any(n.endswith('-cnc-top.dxf') for n in cn) and 'READ-ME.txt' in cn, 'pack holds a top DXF and a read-me')
+    note = cz.read('READ-ME.txt').decode()
+    T = design['body']['thickness']; nk = design['neck']
+    heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
+    for side, sign in (('top', 1), ('back', -1)):
+        names = [n for n in cn if n.endswith('-cnc-%s.dxf' % side)]
+        if not names: print('  no %s file (nothing is cut from that side)' % side); continue
+        chead, cpolys = parse_dxf(cz.read(names[0]).decode())
+        check(chead.get('$INSUNITS') == '4', '%s file is in millimeters' % side)
+        layers = sorted(set(p['layer'] for p in cpolys))
+        check(all(l in note for l in layers), 'every layer of the %s file is explained in the read-me (%d layers)' % (side, len(layers)))
+        circs = [p for p in cpolys if p.get('circle')]
+        want = [(sign * sx, sy) for sy in (s0, s0 + nk['screwAlong']) for sx in (-sa, sa)]
+        got = [p for p in circs if p['layer'].startswith('THROUGH_NECK_SCREW')]
+        check(len(got) == 4 and all(any(abs(p['c'][0] - x) < 1e-4 and abs(p['c'][1] - y) < 1e-4 and abs(p['r'] - nk['screwBodyHole'] / 2) < 1e-4 for p in got) for x, y in want), '%s file: four neck screw circles at the positions and size the neck numbers give' % side)
+        check(all(any(abs(p['c'][0] - sign * c['x']) < 1e-4 and abs(p['c'][1] - c['y']) < 1e-4 and abs(p['r'] - c['d'] / 2) < 1e-4 for p in circs) for c in design['controls']), '%s file: control holes at their places%s' % (side, ' (mirrored across the centerline)' if sign < 0 else ''))
+        if side == 'top':
+            pk = [p for p in cpolys if p['layer'] == 'TOP_NECK_POCKET_%.2fMM_DEEP' % nk['pocketDepth']]
+            check(len(pk) == 1, 'neck pocket is on a layer named for its depth (%.2f mm)' % nk['pocketDepth'])
+            if pk:
+                e = expand(pk[0]); b = bbox(e)
+                check(abs(b[1] - heel) < 1e-4, 'neck pocket end wall is on the heel line (y = %.3f)' % heel)
+                low = [q for q in e if q[1] < heel + 1e-3]
+                check(abs((max(q[0] for q in low) - min(q[0] for q in low)) - (nk['heelWidth'] - 2 * nk['heelCornerR'])) < 0.02, 'no offset built in: the pocket end wall is the heel width less its two corner radii')
+            for i, pu in enumerate(design['pickups']):
+                check(any(('_%.2fMM_DEEP' % pu['depth']) in l and l.startswith('TOP_') for l in layers), 'pickup %d: a top layer at its depth, %.2f mm' % (i + 1, pu['depth']))
+        else:
+            for c in design['cavities']:
+                if c['side'] != 'back': continue
+                m = [p for p in cpolys if p['layer'].startswith('BACK_') and ('_%.2fMM_DEEP' % min(c['depth'], T)) in p['layer'] and not p.get('circle')]
+                # a rounded rectangle, possibly turned: its box is centered on it and its area does not change
+                bs = [(bbox(expand(p)), area(expand(p))) for p in m]
+                want_area = c['w'] * c['h'] - (4 - math.pi) * c['r'] ** 2
+                check(any(abs((b[0] + b[2]) / 2 + c['x']) < 0.02 and abs((b[1] + b[3]) / 2 - c['y']) < 0.02 and abs(ar - want_area) < 0.5 for b, ar in bs), 'back file: %s mirrored across the centerline, at its depth and size' % c['name'])
+# the headstock's own file, with the tuner holes: positions worked out here from the saved design's numbers
+for f in glob.glob(D + '/tuners-cnc-pack.zip'):
+    nd = json.load(open(D + '/neck-design.json')); hd = nd['neck']['head']; tu = hd['tuners']
+    tz = zipfile.ZipFile(f)
+    hn = [n for n in tz.namelist() if n.endswith('-cnc-headstock.dxf')]
+    check(len(hn) == 1, 'the vector pack has one headstock file')
+    if hn:
+        hh, hp = parse_dxf(tz.read(hn[0]).decode())
+        circles = [p for p in hp if p.get('r') and 'TUNER' in p['layer']]
+        rows = [(-1, 3), (1, 3)] if tu['layout'] == '3+3' else [((1 if tu['side'] == 'treble' else -1), 6)]
+        want = [(sg * (tu['inFirst'] + (tu['inLast'] - tu['inFirst']) * k / (n - 1)), tu['first'] + k * tu['pitch']) for sg, n in rows for k in range(n)]
+        check(len(circles) == len(want) and all(abs(p['r'] - tu['hole'] / 2) < 1e-4 for p in circles), 'headstock file: %d tuner holes, %.2f mm across, as true circles' % (len(circles), tu['hole']))
+        check(all(any(abs(p['c'][0] - x) < 1e-4 and abs(p['c'][1] - y) < 1e-4 for p in circles) for x, y in want), 'each tuner hole is where the design\'s numbers put it, measured from the nut line and the centerline')
+        check(all(p['layer'] == 'THROUGH_TUNER_%.2fMM_HOLE' % tu['hole'] for p in circles), 'on a layer named with the hole\'s size')
+        outl = [p for p in hp if p['layer'] == 'HEADSTOCK_OUTLINE']
+        far = max(n['y'] for n in hd['outline']['nodes'])
+        if outl and outl[0].get('v'):
+            ys = [q[1] for q in outl[0]['v']]
+            check(abs(min(ys)) < 0.05 and abs(max(ys) - far) < 0.6, 'the headstock outline stands on the nut line and is %.1f mm long' % (max(ys) - min(ys)))
+        else:
+            check(len(outl) == 1, 'the headstock outline is one closed path')
+
+for f in glob.glob(D + '/*-cnc-vectors-inch.zip'):
+    iz = zipfile.ZipFile(f)
+    ihead, ipolys = parse_dxf(iz.read([n for n in iz.namelist() if n.endswith('-cnc-top.dxf')][0]).decode())
+    print('CNC', os.path.basename(f))
+    check(ihead.get('$INSUNITS') == '1', 'inch pack: the top file says it is in inches')
+    nk = design['neck']; r_in = nk['screwBodyHole'] / 2 / IN
+    sc = [p for p in ipolys if p.get('circle') and p['layer'].startswith('THROUGH_NECK_SCREW')]
+    heel = nk['scale'] - nk['nutToHeel']; s0 = heel + nk['screwFromHeelEnd']; sa = nk['screwAcross'] / 2
+    check(len(sc) == 4 and all(abs(p['r'] - r_in) < 1e-5 for p in sc) and any(abs(p['c'][0] - sa / IN) < 1e-4 and abs(p['c'][1] - s0 / IN) < 1e-4 for p in sc), 'inch pack: neck screw circles are %.4f in across, at the neck\'s positions in inches' % (2 * r_in))
+    check(any(p['layer'] == 'TOP_NECK_POCKET_%.4fIN_DEEP' % (nk['pocketDepth'] / IN) for p in ipolys), 'inch pack: the neck pocket layer gives its depth in inches (%.4f)' % (nk['pocketDepth'] / IN))
+# ---------- STEP (3D model of the neck) ----------
+for f in glob.glob(D + '/*-neck.step'):
+    N = parse_step(open(f).read()); nkinds = [k for k, _ in N.values()]
+    print('STEP', os.path.basename(f), len(N), 'entities')
+    check(nkinds.count('MANIFOLD_SOLID_BREP') == 1, 'the neck is one solid')
+    vs = [nums(N[refs(a)[0]][1])[-3:] for k, a in N.values() if k == 'VERTEX_POINT']
+    nd = json.load(open(os.path.join(D, 'neck-design.json'))) if os.path.exists(os.path.join(D, 'neck-design.json')) else design  # the design as it was when the neck was saved
+    nk = nd['neck']; T = nd['body']['thickness']
+    ys = [v[1] for v in vs]; zs = [v[2] for v in vs]; xs = [v[0] for v in vs]
+    head = nk.get('head') or {}
+    if head.get('on'):
+        flat = head.get('kind') == 'flat'  # a flat headstock is level with the neck, its face stepped down
+        ang = 0.0 if flat else math.radians(head['angle']); far = max(n['y'] for n in head['outline']['nodes'])
+        check(abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4 and abs(max(ys) - (nk['scale'] + far * math.cos(ang))) < 0.6, 'it runs from the end of the heel to the tip of the headstock, %.1f mm past the nut' % (max(ys) - nk['scale']))
+        check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4, 'its flat top stands %.3f mm above the body' % nk['heelStandProud'])
+        low = T + nk['heelStandProud'] - far * math.sin(ang) - head['thickness'] * math.cos(ang) - (head.get('drop', 0) if flat else 0)
+        check(abs(min(zs) - low) < 0.6, 'the tip of the headstock hangs %.1f mm below the top: its angle and thickness are right' % (T + nk['heelStandProud'] - min(zs)))
+    else:
+        check(abs(max(ys) - nk['scale']) < 1e-4 and abs(min(ys) - (nk['scale'] - nk['nutToHeel'])) < 1e-4, 'it runs from the nut (one scale length from the scale line) to the end of the heel, %.2f mm' % (max(ys) - min(ys)))
+        check(abs(max(zs) - (T + nk['heelStandProud'])) < 1e-4 and abs(min(zs) - (T - nk['pocketDepth'])) < 1e-4, 'its flat top stands %.3f mm above the body and its heel sits on the pocket floor' % nk['heelStandProud'])
+    heel_x = [v[0] for v in vs if v[1] < nk['scale'] - nk['nutToHeel'] + nk['pocketLength'] + 1e-6]
+    check(abs((max(heel_x) - min(heel_x)) - nk['heelWidth']) < 1e-3, 'the heel is the pocket\'s width, %.3f mm' % nk['heelWidth'])
 print('ALL OK' if ok else 'PROBLEMS FOUND')
 sys.exit(0 if ok else 1)

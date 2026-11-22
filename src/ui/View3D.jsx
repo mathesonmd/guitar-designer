@@ -5,7 +5,7 @@ import { useSize, Seg, Check } from './widgets.jsx';
 
 const WOOD_COLOR = { alder: 0xb68a5c, basswood: 0xd6bf97, poplar: 0xc4b98a, mahogany: 0x7c4a33, walnut: 0x5d4333, ash: 0xd8bd8c, maple: 0xe2c898, custom: 0xb68a5c };
 
-export default function View3D({ design, g, solid }) {
+export default function View3D({ design, g, solid, onSaveModel }) {
   const wrap = useRef(null), canvas = useRef(null);
   const size = useSize(wrap);
   const three = useRef(null);
@@ -87,7 +87,8 @@ export default function View3D({ design, g, solid }) {
     geo.setAttribute('normal', new THREE.BufferAttribute(m.normals, 3));
     const mat = new THREE.MeshStandardMaterial({ color: WOOD_COLOR[design.body.wood] || WOOD_COLOR.alder, roughness: 0.56, metalness: 0.02 }); // the mesh is closed and wound outward, so back faces are never needed
     st.body.add(new THREE.Mesh(geo, mat));
-    st.target.set(0, (g.bbox.y0 + g.bbox.y1) / 2 + (parts ? 90 : 0), solid.T / 2);
+    st.home = [0, (g.bbox.y0 + g.bbox.y1) / 2 + (parts ? 90 : 0), solid.T / 2]; st.nut = [0, g.nutY + 25, solid.T];
+    if (!st.close) st.target.set(...st.home);
     st.render();
   }, [solid, g, design.body.wood, parts]);
 
@@ -98,7 +99,7 @@ export default function View3D({ design, g, solid }) {
     clear(st.extras);
     if (!parts) { st.render(); return; }
     const T = solid.T, nk = design.neck;
-    const zHeelTop = T + nk.heelStandProud, zBoardTop = zHeelTop + 5;
+    const zHeelTop = T + nk.heelStandProud, zBoardTop = zHeelTop + (g.neck ? g.neck.board : 5);
     const mat = (color, rough = 0.6, metal = 0) => new THREE.MeshStandardMaterial({ color, roughness: rough, metalness: metal });
     const maple = mat(0xdcc394, 0.55), board = mat(0x3a281d, 0.7), metal = mat(0x8f949a, 0.42, 0.35), black = mat(0x151515, 0.5), bone = mat(0xede6d8, 0.5);
     const ex = (poly, z0, z1, material) => {
@@ -108,18 +109,45 @@ export default function View3D({ design, g, solid }) {
       mesh.position.z = z0;
       st.extras.add(mesh);
     };
-    // heel block in the pocket, then the neck shaft as a half-round, then a plain paddle headstock
-    const yShaft = g.heelY + nk.pocketLength;
+    // the neck's own shape (model/neck.js): the heel block in the pocket, the shaft through its
+    // cross-sections, and the headstock
     const h = g.neckHalf;
-    ex([{ x: -h(g.heelY), y: g.heelY }, { x: h(g.heelY), y: g.heelY }, { x: h(yShaft), y: yShaft }, { x: -h(yShaft), y: yShaft }], T - nk.pocketDepth, zHeelTop, maple);
-    const stations = 26, ring = 14, pos = [];
-    const pt = (i, j) => { const y = yShaft + ((g.nutY - yShaft) * i) / stations; const w = h(y), d = 21 - (4 * i) / stations; const a = (Math.PI * j) / ring; return [w * Math.cos(a), y, zHeelTop - d * Math.sin(a)]; };
-    for (let i = 0; i < stations; i++) for (let j = 0; j < ring; j++) { const a = pt(i, j), b = pt(i + 1, j), c = pt(i + 1, j + 1), d = pt(i, j + 1); pos.push(...a, ...b, ...c, ...a, ...c, ...d); }
-    const shaft = new THREE.BufferGeometry(); shaft.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); shaft.computeVertexNormals();
-    const shaftMat = maple.clone(); shaftMat.side = THREE.DoubleSide;
-    st.extras.add(new THREE.Mesh(shaft, shaftMat));
+    const neck = g.neck, zTop = neck ? neck.top : zHeelTop;
+    if (neck) {
+      ex(neck.heel, neck.heelBottom, neck.top, maple);
+      // a run of cross-sections as one skin: the back shaded smoothly, the flat top and the ends as flats
+      const skin = (secs, capFirst, capLast) => {
+        const m = secs[0].p3.length, pos = [], idx = [];
+        for (const q of secs) for (const p of q.p3) pos.push(p[0], p[1], p[2]);
+        for (let i = 0; i < secs.length - 1; i++) for (let j = 0; j < m - 1; j++) { const a = i * m + j, b = a + m; idx.push(a, b, b + 1, a, b + 1, a + 1); }
+        const flat = (pts) => { const at = pos.length / 3; for (const p of pts) pos.push(p[0], p[1], p[2]); return at; };
+        for (let i = 0; i < secs.length - 1; i++) { const a = secs[i].p3, b = secs[i + 1].p3, o = flat([a[0], a[m - 1], b[m - 1], b[0]]); idx.push(o, o + 1, o + 2, o, o + 2, o + 3); }
+        for (const [q, on] of [[secs[0], capFirst], [secs[secs.length - 1], capLast]]) if (on) { const o = flat(q.p3); for (let j = 1; j < m - 1; j++) idx.push(o, o + j, o + j + 1); }
+        const geo = new THREE.BufferGeometry(); geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setIndex(idx); geo.computeVertexNormals();
+        const mt = maple.clone(); mt.side = THREE.DoubleSide;
+        st.extras.add(new THREE.Mesh(geo, mt));
+      };
+      const hd = neck.head;
+      // one skin from the end of the transition to the heel, so the back is shaded as the single surface it is
+      skin(hd ? [...hd.sections.slice(1).reverse(), ...neck.sections] : neck.sections, !hd, false);
+      if (hd) {
+        // past the transition, the slab at its true shape, tilted back about the nut line
+        const shape = new THREE.Shape(hd.slab.map((p) => new THREE.Vector2(p.x, p.y)));
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: hd.thick, bevelEnabled: false, curveSegments: 1 });
+        geo.translate(0, 0, -hd.thick);
+        const mesh = new THREE.Mesh(geo, maple);
+        mesh.rotation.x = -hd.ang; mesh.position.set(0, g.nutY, neck.top - hd.drop);
+        st.extras.add(mesh);
+        // tuner holes, shown as dark plugs right through the headstock (for looks: the holes themselves are cut from the vectors)
+        for (const t of hd.tuners) {
+          const plug = new THREE.Mesh(new THREE.CylinderGeometry(t.d / 2, t.d / 2, hd.thick + 0.5, 24), black);
+          const c = hd.spot(t.x, t.v, hd.thick / 2);
+          plug.position.set(c.x, c.y, c.z); plug.rotation.x = Math.PI / 2 - hd.ang;
+          st.extras.add(plug);
+        }
+      }
+    }
     const hw = h(g.nutY);
-    ex([{ x: -hw, y: g.nutY }, { x: hw, y: g.nutY }, { x: hw + 16, y: g.nutY + 40 }, { x: hw + 14, y: g.nutY + 165 }, { x: -hw + 4, y: g.nutY + 178 }, { x: -hw - 6, y: g.nutY + 40 }], zHeelTop - 13, zHeelTop, maple);
     ex(g.fretboard, zHeelTop, zBoardTop, board);
     for (const f of g.frets) { const m = new THREE.Mesh(new THREE.BoxGeometry(f.half * 2, 2.2, 1.1), metal); m.position.set(0, f.y, zBoardTop + 0.5); st.extras.add(m); }
     const nut = new THREE.Mesh(new THREE.BoxGeometry(hw * 2, 3.2, 3), bone); nut.position.set(0, g.nutY + 1.6, zBoardTop + 1.2); st.extras.add(nut);
@@ -139,18 +167,19 @@ export default function View3D({ design, g, solid }) {
     st.render();
   }, [solid, g, parts, design.neck, design.bridge.type]);
 
-  const look = (az, pol) => { const st = three.current; if (st) { st.az = az; st.pol = pol; st.render(); } };
+  const look = (az, pol, close) => { const st = three.current; if (st) { st.az = az; st.pol = pol; st.close = !!close; st.target.set(...(close ? st.nut : st.home)); st.r = close ? 430 : 1150; st.render(); } };
 
   return (
     <div ref={wrap} style={{ position: 'absolute', inset: 0 }}>
       <canvas ref={canvas} aria-label="3D view of the body. Drag to turn it, scroll to zoom." />
       {failed && <div className="toast">3D needs WebGL, which this browser or device has turned off. The drawing and templates still work.</div>}
       <div className="viewopts">
-        <Seg label="View" value="" onChange={(v) => look(...{ front: [0, Math.PI / 2 - 0.001], back: [Math.PI, Math.PI / 2 - 0.001], angle: [-0.5, 1.22], edge: [Math.PI / 2, Math.PI / 2 - 0.001] }[v])}
-          options={[{ value: 'angle', label: 'Angle' }, { value: 'front', label: 'Front' }, { value: 'back', label: 'Back' }, { value: 'edge', label: 'Edge' }]} />
+        <Seg label="View" value="" onChange={(v) => look(...{ front: [0, Math.PI / 2 - 0.001], back: [Math.PI, Math.PI / 2 - 0.001], angle: [-0.5, 1.22], edge: [Math.PI / 2, Math.PI / 2 - 0.001], head: [Math.PI - 0.75, 1.15, true] }[v])}
+          options={[{ value: 'angle', label: 'Angle' }, { value: 'front', label: 'Front' }, { value: 'back', label: 'Back' }, { value: 'edge', label: 'Edge' }, ...(g.neck && g.neck.head && parts ? [{ value: 'head', label: 'Back of headstock' }] : [])]} />
         <div className="float" style={{ position: 'static' }}><Check checked={parts} onChange={setParts}>Neck and hardware</Check></div>
+        {onSaveModel && <button className="btn" onClick={onSaveModel}>Save files for CNC…</button>}
       </div>
-      <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>Neck and hardware are shown for looks</span></div>
+      <div className="hintline"><span>Drag to turn · Shift-drag to slide · scroll to zoom</span><span>The fretboard and hardware are shown for looks</span></div>
     </div>
   );
 }

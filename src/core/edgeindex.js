@@ -21,7 +21,7 @@ export class EdgeIndex {
     const { p, cell, map } = this;
     const n = p.length;
     const cx = Math.floor(px / cell), cy = Math.floor(py / cell);
-    let best = Infinity, bx = 0, by = 0;
+    let best = Infinity, bx = 0, by = 0, bi = -1;
     for (let ring = 0; ring < 400; ring++) {
       if (best < Infinity && (ring - 1) * cell > best) break;
       for (let x = cx - ring; x <= cx + ring; x++) for (let y = cy - ring; y <= cy + ring; y++) {
@@ -34,10 +34,10 @@ export class EdgeIndex {
           let t = l2 > 0 ? ((px - a.x) * dx + (py - a.y) * dy) / l2 : 0;
           t = t < 0 ? 0 : t > 1 ? 1 : t;
           const qx = a.x + dx * t, qy = a.y + dy * t, d = Math.hypot(px - qx, py - qy);
-          if (d < best) { best = d; bx = qx; by = qy; }
+          if (d < best) { best = d; bx = qx; by = qy; bi = i; }
         }
       }
     }
-    return { d: best, x: bx, y: by };
+    return { d: best, x: bx, y: by, i: bi }; // i: which edge of the polygon it is on
   }
 }

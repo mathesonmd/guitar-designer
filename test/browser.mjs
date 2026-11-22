@@ -16,6 +16,15 @@ const LOCAL = {
   'https://cdn.jsdelivr.net/npm/clipper-lib@6.4.2/clipper.js': 'node_modules/clipper-lib/clipper.js',
   'https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js': 'node_modules/jspdf/dist/jspdf.umd.min.js',
 };
+// The 3D engine, which the page fetches only when a 3D model is saved. Served with the header that
+// lets a page read a file from another site, as the CDN does.
+const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8')).devDependencies;
+const LAZY = {
+  [`https://cdn.jsdelivr.net/npm/replicad@${pkg.replicad}/dist/replicad.umd.cjs`]: ['node_modules/replicad/dist/replicad.umd.cjs', 'application/node'],
+  [`https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${pkg['replicad-opencascadejs']}/dist/replicad_single.js`]: ['node_modules/replicad-opencascadejs/dist/replicad_single.js', 'application/javascript'],
+  [`https://cdn.jsdelivr.net/npm/replicad-opencascadejs@${pkg['replicad-opencascadejs']}/dist/replicad_single.wasm`]: ['node_modules/replicad-opencascadejs/dist/replicad_single.wasm', 'application/wasm'],
+};
+export const fetched = []; // every 3D engine file the page asked for
 export async function open({ width = 1440, height = 900, file = 'dist/index.html', init = null } = {}) {
   const browser = await chromium.launch({ args: ['--use-gl=swiftshader', '--enable-unsafe-swiftshader', '--ignore-gpu-blocklist'] });
   const page = await browser.newPage({ viewport: { width, height }, deviceScaleFactor: 1 });
@@ -25,6 +34,7 @@ export async function open({ width = 1440, height = 900, file = 'dist/index.html
   await page.route('**/*', (route) => {
     const u = route.request().url();
     if (LOCAL[u]) return route.fulfill({ path: path.join(root, LOCAL[u]), contentType: 'application/javascript' });
+    if (LAZY[u]) { fetched.push(u); return route.fulfill({ path: path.join(root, LAZY[u][0]), contentType: LAZY[u][1], headers: { 'access-control-allow-origin': '*', 'x-content-type-options': 'nosniff' } }); }
     if (u.startsWith('file:') || u.startsWith('data:') || u.startsWith('blob:')) return route.continue();
     if (u.includes('fonts.googleapis.com')) return route.fulfill({ body: '', contentType: 'text/css' });
     return route.abort();
