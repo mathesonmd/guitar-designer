@@ -35,6 +35,7 @@
 import { fretDistance } from '../core/fret.js';
 import { signedArea } from '../core/poly.js';
 import { flattenNodes } from '../core/path.js';
+import { cleanNut } from './truss.js';
 
 // The CAD surface joins each cross-section to the next with straight lines, so where the shape is changing
 // the sections sit this close together. At 1 mm the straight lines stay within about 0.01 mm of the true
@@ -258,7 +259,12 @@ export function buildNeck(design, g) {
     const drop = level ? Math.max(0, Math.min(15, h.drop)) : 0, scoop = level ? Math.max(5, Math.min(60, h.scoop)) : 0;
     const scoopRadius = drop > 0 ? (scoop * scoop + drop * drop) / (2 * drop) : 0;
     // how far the face is below the neck's top at a place past the nut
-    const ramp = (v) => (!(drop > 0) || v <= 0 ? 0 : v >= scoop ? drop : drop - (scoopRadius - Math.sqrt(scoopRadius * scoopRadius - (scoop - v) * (scoop - v))));
+    // The scoop begins where the fretboard ends. That is the nut line until a nut has been read from a
+    // Fretboard Designer file; with one, it is the fretboard's end past the nut line (the back of the nut,
+    // or the end of its shelf), so the face stays level under the nut and the board.
+    const nut = cleanNut(nk.nut), lead = level && nut.thickness > 0 ? Math.min(nut.boardPast, 40) : 0;
+    const scoopAt = (v) => (!(drop > 0) || v <= 0 ? 0 : v >= scoop ? drop : drop - (scoopRadius - Math.sqrt(scoopRadius * scoopRadius - (scoop - v) * (scoop - v))));
+    const ramp = (v) => scoopAt(v - lead);
     const thick = Math.max(6, Math.min(30, h.thickness)), rise = Math.max(0, Math.min(15, h.voluteHeight)), run = Math.max(5, Math.min(120, h.voluteLength));
     // the volute's length on the headstock side of the nut (it has to be gone by the end of the transition)
     const fallAsked = Math.max(5, Math.min(120, h.voluteAhead));
@@ -270,7 +276,7 @@ export function buildNeck(design, g) {
     const length = Math.max(...poly.map((p) => p.y));
     // the transition length, measured along the headstock's face from the nut
     // (on a flat headstock it is never shorter than the scoop: the face must be level before the flat begins)
-    const reach = Math.max(level ? scoop + 5 : 0, Math.max(20, Math.min(h.transition, 80, length * 0.6)));
+    const reach = Math.max(level ? lead + scoop + 5 : 0, Math.max(20, Math.min(h.transition, 80, length * 0.6)));
     // The volute, the tongue's rise and a drawn side view all have to be gone by `lineEnd`: the place along
     // the neck where the centerline of the last leaning section meets the back. (On an angled headstock
     // that is a little short of the transition length, because that section leans back toward the nut.)
@@ -467,7 +473,7 @@ export function buildNeck(design, g) {
     }
     // a point of the headstock past the transition: x across, v along its face from the nut, w down into it from its face
     const spot = (x, v, w) => (level ? { x, y: g.nutY + v, z: top - ramp(v) - w } : place(x, v, w));
-    head = { lineEnd, tuners, spot, centerOut, side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, line };
+    head = { lineEnd, tuners, spot, centerOut, side, swell, backFrom: Math.max(tongue ? -tongue.from : side ? -side.from : run, behind), tongue, ang, sin, cos, tan, thick, rise, run, fall, peaked, reach, behind, ahead, backZ: zBack, bump, widths, at: (v) => station(v), nodes, poly, slab, length, place, get sections() { return sectionsOf(); }, faceZ: (y) => top - (y - g.nutY) * tan - ramp(y - g.nutY), level, drop, scoop, scoopFrom: lead, line };
   }
   const at = (y) => {
     const s = toHeel(y), base = head ? top - zBack(y) : shaftDepth(y), depth = base + (heelDepth - base) * s;

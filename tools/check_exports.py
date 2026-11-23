@@ -448,8 +448,9 @@ for f in glob.glob(D + '/truss-cnc-pack.zip'):
             check(len(ac) == 1 and ac[0]['layer'] == 'TOP_TRUSS_ROD_ADJUSTER_POCKET_%.2fMM_WIDE_%.2fMM_DEEP' % (tr['accessWidth'], tr['accessDepth']), 'one pocket for the adjuster, on a layer named with its width and depth')
             if ac:
                 x0, x1, y0, y1 = span(ac[0])
-                want = (-tr['fromNut'], -tr['fromNut'] + tr['accessLength']) if tr['adjust'] != 'heel' else (-tr['fromNut'] - tr['length'] - tr['accessLength'], -tr['fromNut'] - tr['length'])
-                check(abs(x1 - x0 - tr['accessWidth']) < 1e-4 and abs(y0 - want[0]) < 1e-4 and abs(y1 - want[1]) < 1e-4, 'the pocket is %.2f mm wide and carries on %.2f mm from the %s end of the channel' % (x1 - x0, y1 - y0, 'heel' if tr['adjust'] == 'heel' else 'headstock'))
+                nt = tn.get('nut') or {}; past = nt.get('boardPast', 0) if nt.get('thickness', 0) > 0 else 0   # the fretboard's end past the nut line
+                want = (-tr['fromNut'], past + tr['accessLength']) if tr['adjust'] != 'heel' else (-tr['fromNut'] - tr['length'] - tr['accessLength'], -tr['fromNut'] - tr['length'])
+                check(abs(x1 - x0 - tr['accessWidth']) < 1e-4 and abs(y0 - want[0]) < 1e-4 and abs(y1 - want[1]) < 1e-4, ('the pocket is %.2f mm wide and carries on %.2f mm from the heel end of the channel' % (x1 - x0, y1 - y0)) if tr['adjust'] == 'heel' else ('the pocket is %.2f mm wide and runs from the channel to %.2f mm past the end of the fretboard, which is %.2f mm past the nut line' % (x1 - x0, y1 - past, past)))
         ol = [p for p in npolys if p['layer'] == 'NECK_OUTLINE']
         check(len(ol) == 1, 'the neck outline is one closed path')
         if ol:

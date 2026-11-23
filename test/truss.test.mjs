@@ -77,7 +77,7 @@ test('a channel that is too deep, too wide, or runs out of the heel is caught', 
 test('the adjuster’s pocket goes at the chosen end, and needs all three of its sizes', () => {
   const head = derive(withTruss({ ...SIZES, accessWidth: 10, accessLength: 30, accessDepth: 11 })).truss, g = derive(defaultDesign());
   const hb = bbox(head.access.poly);
-  near(hb.y0, g.nutY - 12, 1e-9, 'from the channel’s headstock end'); near(hb.y1, g.nutY + 18, 1e-9, 'past the nut'); near(hb.w, 10, 1e-9);
+  near(hb.y0, g.nutY - 12, 1e-9, 'from the channel’s headstock end'); near(hb.y1, g.nutY + 30, 1e-9, '30 past the end of the fretboard, which is the nut line until a nut is loaded'); near(hb.w, 10, 1e-9);
   const heel = derive(withTruss({ ...SIZES, adjust: 'heel', accessWidth: 10, accessLength: 30, accessDepth: 11 })).truss, lb = bbox(heel.access.poly);
   near(lb.y1, g.nutY - 412, 1e-9, 'from the channel’s heel end'); near(lb.y0, g.nutY - 442, 1e-9, 'toward the end of the heel');
   const part = withTruss({ ...SIZES, accessWidth: 10 });
@@ -93,7 +93,7 @@ test('the neck gets its own vector file: outline, nut line, and the channel on a
   const ch = box(on(/^TOP_TRUSS_ROD_CHANNEL/)[0]);
   near(ch.w, 6, 1e-9); near(ch.y1, -12, 1e-9, 'y is measured from the nut line'); near(ch.y0, -412, 1e-9); near(ch.cx, 0, 1e-9);
   const ac = box(on(/^TOP_TRUSS_ROD_ADJUSTER_POCKET/)[0]);
-  near(ac.y0, -12, 1e-9); near(ac.y1, 18, 1e-9);
+  near(ac.y0, -12, 1e-9); near(ac.y1, 30, 1e-9);
   const o = box(on(/^NECK_OUTLINE$/)[0]);
   near(o.y1, 0, 1e-6, 'the outline ends on the nut line'); near(o.y0, -d.neck.nutToHeel, 1e-6, 'and starts at the end of the heel');
   assert.ok(o.w < d.neck.heelWidth && o.w > d.neck.nutWidth);
@@ -143,4 +143,36 @@ test('the nut comes only from a Fretboard Designer file: its thickness, a zero f
   const plain = derive(defaultDesign());
   assert.deepEqual(g.pocket, plain.pocket); assert.deepEqual(g.frets, plain.frets);
   assert.deepEqual(buildCncVectors(d, derive(d, { tol: 0.005 })).files.map((f) => f.layers.map((L) => L.name)), buildCncVectors(defaultDesign(), derive(defaultDesign(), { tol: 0.005 })).files.map((f) => f.layers.map((L) => L.name)));
+});
+
+test('with a nut loaded, the headstock-end pocket and the flat headstock\u2019s scoop start at the end of the fretboard', () => {
+  const pocket = { ...SIZES, accessWidth: 10, accessLength: 30, accessDepth: 11 };
+  const shelf = nutFromFretboardFile({ nutThickness: 0.125, nutMount: 'shelf', spaceBeforeNut: 0.3 }, 25.4);   // board ends 7.62 past the nut line
+  const flush = nutFromFretboardFile({ nutThickness: 0.125, nutMount: 'flush' }, 25.4);                         // board ends 3.175 past it
+  // the pocket: the same 30 left open on the headstock, measured from wherever the fretboard ends
+  for (const [nut, past] of [[null, 0], [flush, 3.175], [shelf, 7.62]]) {
+    const d = withTruss(pocket); if (nut) d.neck.nut = nut;
+    const g = derive(d), a = g.truss.access, b = bbox(a.poly);
+    near(b.y0, g.nutY - 12, 1e-9, 'it starts at the channel\u2019s end'); near(b.y1, g.nutY + past + 30, 1e-9, `it ends 30 past the fretboard (${past} past the nut line)`);
+    near(a.pastNut, past, 1e-9); near(a.underBoard, 12 + past, 1e-9);
+  }
+  // at the heel end the nut changes nothing
+  const heel = withTruss({ ...pocket, adjust: 'heel' }), hn = withTruss({ ...pocket, adjust: 'heel' }); hn.neck.nut = shelf;
+  assert.deepEqual(derive(hn).truss.access.poly, derive(heel).truss.access.poly);
+  // the neck's vector file carries the longer pocket, and its centerline reaches the pocket's end
+  const d = withTruss(pocket); d.neck.nut = shelf;
+  const f = buildCncVectors(d, derive(d, { tol: 0.005 })).files.find((q) => q.side === 'neck');
+  near(bbox(expandArcs(f.paths.find((p) => /ADJUSTER_POCKET/.test(p.layer)).verts, true)).y1, 37.62, 1e-9);
+  // the scoop of a flat headstock: level to the end of the fretboard, then the same arc as before, moved along
+  const flat = (nut) => { const q = defaultDesign(); q.neck.head = { ...q.neck.head, kind: 'flat', drop: 5, scoop: 22 }; if (nut) q.neck.nut = nut; return derive(q); };
+  const g0 = flat(null), g1 = flat(shelf), h0 = g0.neck.head, h1 = g1.neck.head, top = g0.neck.top;
+  assert.equal(h0.scoopFrom, 0); near(h1.scoopFrom, 7.62, 1e-9);
+  for (const v of [0, 3, 7.62]) near(h1.faceZ(g1.nutY + v), top, 1e-9, `level ${v} past the nut, under the nut and the board`);
+  for (const v of [1, 8, 15, 22, 30]) near(h1.faceZ(g1.nutY + 7.62 + v), h0.faceZ(g0.nutY + v), 1e-9, 'the same scoop, starting where the fretboard ends');
+  near(h1.faceZ(g1.nutY + 7.62 + 22), top - 5, 1e-9, 'at its full step down one scoop length on');
+  assert.ok(h1.reach >= 7.62 + 22 + 5 - 1e-9, 'the transition is never shorter than the lead and the scoop');
+  // an angled headstock has no scoop, so nothing moves there
+  const ang = defaultDesign(); ang.neck.nut = shelf;
+  assert.equal(derive(ang).neck.head.scoopFrom, 0);
+  near(derive(ang).neck.head.faceZ(derive(ang).nutY + 10), derive(defaultDesign()).neck.head.faceZ(derive(defaultDesign()).nutY + 10), 1e-12);
 });
