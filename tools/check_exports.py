@@ -426,6 +426,38 @@ for f in glob.glob(D + '/tuners-cnc-pack.zip'):
         else:
             check(len(outl) == 1, 'the headstock outline is one closed path')
 
+# the neck's own file, with the truss rod channel: places worked out here from the saved design's numbers
+for f in glob.glob(D + '/truss-cnc-pack.zip'):
+    td = json.load(open(D + '/truss-design.json')); tn = td['neck']; tr = tn['truss']
+    tz = zipfile.ZipFile(f)
+    nn = [n for n in tz.namelist() if n.endswith('-cnc-neck.dxf')]
+    print('CNC', os.path.basename(f))
+    check(len(nn) == 1, 'the vector pack has one neck file')
+    if nn:
+        nh, npolys = parse_dxf(tz.read(nn[0]).decode())
+        def span(p): xs = [q[0] for q in p['v']]; ys = [q[1] for q in p['v']]; return min(xs), max(xs), min(ys), max(ys)
+        ch = [p for p in npolys if p['layer'].startswith('TOP_TRUSS_ROD_CHANNEL')]
+        check(len(ch) == 1 and ch[0]['layer'] == 'TOP_TRUSS_ROD_CHANNEL_%.2fMM_WIDE_%.2fMM_DEEP' % (tr['width'], tr['depth']), 'neck file: one truss rod channel, on a layer named with its width and depth')
+        if ch:
+            x0, x1, y0, y1 = span(ch[0])
+            check(abs(x0 + tr['width'] / 2) < 1e-4 and abs(x1 - tr['width'] / 2) < 1e-4, 'the channel is %.2f mm wide, centered on the centerline' % (x1 - x0))
+            check(abs(y1 + tr['fromNut']) < 1e-4 and abs(y0 + tr['fromNut'] + tr['length']) < 1e-4, 'it runs from %.2f to %.2f mm from the nut line, toward the heel' % (-y1, -y0))
+            check(all(abs(q[2]) < 1e-9 for q in ch[0]['v']) and len(ch[0]['v']) == 4, 'with four straight sides')
+        ac = [p for p in npolys if p['layer'].startswith('TOP_TRUSS_ROD_ADJUSTER_POCKET')]
+        if tr['accessWidth'] > 0 and tr['accessLength'] > 0 and tr['accessDepth'] > 0:
+            check(len(ac) == 1 and ac[0]['layer'] == 'TOP_TRUSS_ROD_ADJUSTER_POCKET_%.2fMM_WIDE_%.2fMM_DEEP' % (tr['accessWidth'], tr['accessDepth']), 'one pocket for the adjuster, on a layer named with its width and depth')
+            if ac:
+                x0, x1, y0, y1 = span(ac[0])
+                want = (-tr['fromNut'], -tr['fromNut'] + tr['accessLength']) if tr['adjust'] != 'heel' else (-tr['fromNut'] - tr['length'] - tr['accessLength'], -tr['fromNut'] - tr['length'])
+                check(abs(x1 - x0 - tr['accessWidth']) < 1e-4 and abs(y0 - want[0]) < 1e-4 and abs(y1 - want[1]) < 1e-4, 'the pocket is %.2f mm wide and carries on %.2f mm from the %s end of the channel' % (x1 - x0, y1 - y0, 'heel' if tr['adjust'] == 'heel' else 'headstock'))
+        ol = [p for p in npolys if p['layer'] == 'NECK_OUTLINE']
+        check(len(ol) == 1, 'the neck outline is one closed path')
+        if ol:
+            x0, x1, y0, y1 = span(ol[0])
+            check(abs(y1) < 1e-4 and abs(y0 + tn['nutToHeel']) < 1e-4, 'the neck outline runs from the nut line to the end of the heel, %.2f mm' % (y1 - y0))
+            top = [q for q in ol[0]['v'] if abs(q[1]) < 1e-4]
+            check(len(top) == 2 and abs(abs(top[0][0] - top[1][0]) - tn['nutWidth']) < 1e-3, 'and is the nut\'s width, %.3f mm, at the nut line' % tn['nutWidth'])
+
 for f in glob.glob(D + '/*-cnc-vectors-inch.zip'):
     iz = zipfile.ZipFile(f)
     ihead, ipolys = parse_dxf(iz.read([n for n in iz.namelist() if n.endswith('-cnc-top.dxf')][0]).decode())

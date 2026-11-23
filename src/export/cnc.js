@@ -109,6 +109,22 @@ export function buildCncVectors(design, g, { units = 'mm' } = {}) {
     }
     files.push({ side: 'headstock', name: 'Front of the headstock, laid flat at its true shape', layers, paths });
   }
+  // The top face of the neck, when it has a truss rod channel with its sizes entered: the face the fretboard
+  // is glued to, as a part of its own (x across, y along from the nut line, so the neck lies below y = 0 and
+  // the headstock above, the same way round as the headstock's file).
+  const tr = g.truss && g.truss.ready ? g.truss : null;
+  if (tr) {
+    const layers = [], paths = [], ny = g.nutY;
+    const layer = (name, what, depth, note, aci) => { let L = layers.find((q) => q.name === name); if (!L) { L = { name, aci, what, count: 0, depth, note }; layers.push(L); } L.count++; return name; };
+    const shift = (poly) => poly.map((q) => ({ x: q.x, y: q.y - ny, bulge: q.bulge || 0 }));
+    paths.push({ layer: layer('NECK_OUTLINE', 'Edge of the neck\u2019s top face', null, 'the fretboard\u2019s edges, from the end of the heel to the nut line (the straight end at y = 0); for lining up, or for your own outline toolpath', 1), closed: true, verts: S(shift(fitArcs(g.pocketTo(ny), 0.01, true))) });
+    layers.push({ name: 'GUIDE_CENTERLINE_AND_NUT_LINE', aci: 8, what: 'Centerline and nut line', count: 0, depth: null, note: 'for lining up only: do not cut' });
+    const reach = tr.access && tr.adjust === 'head' ? tr.access.y1 - ny : 0, nutHalf = g.neckHalf(ny);
+    for (const [a, b] of [[{ x: 0, y: g.heelY - ny }, { x: 0, y: Math.max(0, reach) }], [{ x: -nutHalf, y: 0 }, { x: nutHalf, y: 0 }]]) paths.push({ layer: layer('GUIDE_CENTERLINE_AND_NUT_LINE'), closed: false, verts: S([a, b].map((q) => ({ x: q.x, y: q.y, bulge: 0 }))) });
+    paths.push({ layer: layer(`TOP_TRUSS_ROD_CHANNEL_${sized(tr.width, units)}_WIDE_${sized(tr.depth, units)}_DEEP`, 'Truss rod channel', tr.depth, `${both(tr.width)} wide, ${both(tr.length)} long, flat bottom, square ends as drawn: a round bit leaves round ends, so allow for that against your rod`, 5), closed: true, verts: S(shift(tr.channel)) });
+    if (tr.access) paths.push({ layer: layer(`TOP_TRUSS_ROD_ADJUSTER_POCKET_${sized(tr.access.width, units)}_WIDE_${sized(tr.access.depth, units)}_DEEP`, 'Pocket for the truss rod\u2019s adjuster', tr.access.depth, `${both(tr.access.width)} wide, ${both(tr.access.length)} long, at the ${tr.adjust === 'heel' ? 'heel end' : 'headstock end'} of the channel${tr.adjust === 'head' ? '; it is drawn in the plane of the neck\u2019s top face, so on an angled headstock its depth is measured from that plane, not from the headstock\u2019s face' : ''}`, 3), closed: true, verts: S(shift(tr.access.poly)) });
+    files.push({ side: 'neck', name: 'Top face of the neck, before the fretboard is glued on', layers, paths });
+  }
   return { units, files, unverified: unverifiedNeckKeys(design), box: g.bbox, pocketOverrun };
 }
 
@@ -147,6 +163,7 @@ export function cncReadme(design, vectors, fileNames) {
     vectors.files.some((f) => f.side === 'back')
       ? '  The back file is mirrored across the centerline: it shows the back as you see it after turning the body over like the page of a book.'
       : '  Nothing in this design is cut from the back, so there is no back file.',
+    ...(vectors.files.some((f) => f.side === 'neck') ? ['  The neck file is a separate part: the top face of the neck (the face the fretboard is glued to), x across and', '  y along from the nut line, with the heel toward -y. It carries the truss rod channel, cut from that face before', '  the fretboard goes on. It has its own box and does not line up with the body files. The channel\u2019s sizes are the', '  ones typed into the app: check them against the rod itself before cutting.'] : []),
     ...(vectors.files.some((f) => f.side === 'headstock') ? ['  The headstock file is a separate part: its front face laid flat at its true shape, x across and y along from', '  the nut line. It has its own box and does not line up with the body files. Tuner holes go right through,', '  square to the face.'] : []),
     '',
   ];

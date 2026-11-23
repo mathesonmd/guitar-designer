@@ -226,6 +226,22 @@ export function runChecks(design, g, solid) {
     }
   }
 
+  /* ---- truss rod channel ---- */
+  const tr = g.truss;
+  if (tr && !tr.ready) {
+    const words = { width: 'width', depth: 'depth', length: 'length' };
+    out.push({ level: 'note', ref: 'neck', title: `The truss rod channel needs its ${tr.missing.map((k) => words[k]).join(', ').replace(/, ([^,]*)$/, ' and $1')}`, detail: 'No size is built in, because rods differ by maker. Measure your rod and enter the sizes under Neck. Until then the channel is not drawn and not in any file.' });
+  } else if (tr) {
+    if (tr.beside <= 0) out.push({ level: 'error', ref: 'neck', title: 'The truss rod channel is wider than the neck', detail: 'Make the channel narrower.' });
+    if (tr.under && tr.under.t <= 0) out.push({ level: 'error', ref: 'neck', title: 'The truss rod channel cuts through the back of the neck', detail: `It is ${L(tr.depth)} deep, and ${L(tr.under.fromNut)} from the nut the neck has only ${L(tr.under.t + tr.depth)} of wood under the fretboard. Make the channel shallower or the neck thicker.` });
+    else if (tr.under) out.push({ level: 'note', ref: 'neck', title: `${L(tr.under.t)} of wood is left under the truss rod channel at its thinnest`, detail: `That place is ${L(tr.under.fromNut)} from the nut. No least thickness is built in: rod makers say how much wood to leave under their rod, so check this against yours. The back of the headstock past the nut is not measured.` });
+    if (tr.pastHeel > 0.01 && tr.adjust === 'head') out.push({ level: 'warn', ref: 'neck', title: `The truss rod channel runs ${L(tr.pastHeel)} past the end of the heel`, detail: 'It would be open at the end of the neck. Shorten it, or start it nearer the nut.' });
+    if (tr.pastHeel > 0.01 && tr.adjust === 'heel') out.push({ level: 'note', ref: 'neck', title: 'The truss rod channel is open at the end of the heel', detail: `It runs ${L(tr.pastHeel)} past the end of the heel, so the rod is reached from there.` });
+    if (tr.adjust === 'heel' && tr.pastHeel <= 0.01 && !(tr.access && tr.accessShort <= 0.01)) out.push({ level: 'note', ref: 'neck', title: 'The rod adjusts at the heel, but nothing opens at the end of the heel', detail: `The channel stops ${L(-tr.pastHeel)} short of the end of the heel${tr.access ? `, and its pocket ${L(tr.accessShort)} short` : ''}. If the adjuster is to be reached from the end of the neck, lengthen one of them.` });
+    if (tr.accessPartly) out.push({ level: 'note', ref: 'neck', title: 'The pocket for the truss rod\u2019s adjuster needs all three of its sizes', detail: 'Enter its width, length and depth, or set all three to 0 for no pocket. Until then it is not drawn and not in any file.' });
+    if (tr.screws) out.push({ level: 'warn', ref: 'neck', title: `${tr.screws === 1 ? 'A neck screw comes' : `${tr.screws} neck screws come`} up under the truss rod channel`, detail: 'The screws go into the heel from the back. Narrow the channel or its pocket, or move the screws.' });
+  }
+
   /* ---- tuner holes ---- */
   const tuners = g.neck && g.neck.head ? g.neck.head.tuners : [];
   if (tuners.length) {

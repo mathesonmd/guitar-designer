@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 92 geometry and export tests (Node, no browser)
+    npm test               # 98 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -284,6 +284,30 @@ CAD solid; the 3D view draws the same cross-sections.
   make when joined by straight lines, and the flat part's area times its thickness. The CAD solid must
   match it within 1.5% or it is not saved; in a sweep of 48 randomized headstocks all were within 0.2%.
 - Not built: tuner holes, nut slot, truss rod channel, heel screw holes.
+
+## The truss rod channel
+
+`src/model/truss.js`. A straight channel with a flat bottom on the centerline of the neck's top face (the
+face the fretboard is glued to), for a two-way rod, with an optional wider pocket for the adjuster at the
+headstock end or the heel end.
+
+- **No size is built in.** The Fretboard Designer has no truss rod, and rods differ by maker, so every
+  number starts at 0, which means "not entered". Until width, depth and length are typed in, the channel
+  is not drawn and is in no file; the build checks ask for the missing ones. The adjuster's pocket needs
+  all three of its sizes, or none.
+- Build checks: the wood left under the channel at its thinnest place (the neck's depth on the centerline,
+  volute included, less the channel's depth; an error at zero or less; no least thickness is built in),
+  a channel wider than the neck, a channel running out of the end of the heel (a warning when the rod
+  adjusts at the headstock, a plain note when it adjusts at the heel), a heel adjuster nothing opens to,
+  and a neck screw coming up under the channel or its pocket.
+- It is drawn dashed on the drawing and saved in a vector file of the neck's own, `...-cnc-neck.dxf`:
+  x across, y along from the nut line (heel toward -y, the same way round as the headstock's file).
+  Layers: `NECK_OUTLINE`, `GUIDE_CENTERLINE_AND_NUT_LINE`,
+  `TOP_TRUSS_ROD_CHANNEL_<width>_WIDE_<depth>_DEEP`,
+  `TOP_TRUSS_ROD_ADJUSTER_POCKET_<width>_WIDE_<depth>_DEEP`. The owner has not seen these names yet.
+- Stated on screen: the ends are drawn square (a round bit leaves round ends); the channel is not in the
+  3D picture or the 3D model; a headstock-end pocket is drawn in the plane of the neck's top face, so on
+  an angled headstock its depth is measured from that plane and the wood under it there is not checked.
 
 ## Not built yet
 

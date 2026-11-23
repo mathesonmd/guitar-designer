@@ -5,6 +5,7 @@ import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
 import { TUNER_START, TUNER_LAYOUTS } from '../data/neckprofiles.js';
+import { TRUSS_START } from '../model/truss.js';
 import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack, makeHeadstock, makeSideLine, makeTongueLine, seatOnPocket } from '../model/design.js';
 import { NECK_PROFILES, NECK_PROFILE_BASIS } from '../data/neckprofiles.js';
 import { setSymmetric, storedIndex } from '../core/path.js';
@@ -188,7 +189,31 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
                     {hd.on && hasTuners && <Row label="First hole from the centerline" htmlFor="tu-in1" basis={mine('Set it to suit your outline and string path.')}><Len id="tu-in1" units={u} value={tu.inFirst} min={0} max={90} onChange={(v) => setTuners({ inFirst: v })} /></Row>}
                     {hd.on && hasTuners && <Row label="Last hole from the centerline" htmlFor="tu-in2" basis={mine('Set it to suit your outline and string path.')}><Len id="tu-in2" units={u} value={tu.inLast} min={0} max={90} onChange={(v) => setTuners({ inLast: v })} /></Row>}
                     {hd.on && hasTuners && shape && <p className="note">{shape.tuners.length} holes, each row on a straight line from its first hole to its last, right through the headstock and square to its face. {shape.tuners.some((t) => t.gap < 0) ? <b>A hole breaks out of the outline.</b> : <>The hole nearest the edge has <b className="mono">{fmtWithUnit(Math.min(...shape.tuners.map((t) => t.gap)), u)}</b> of wood outside it.</>} They are on the drawing, in the 3D view (as dark plugs), and in the headstock’s own vector file under Save files for CNC. They are not in the 3D model of the neck, and they cannot be dragged on the drawing yet: use these numbers.</p>}
-                    <p className="note"><b>Not built yet:</b> dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the truss rod channel, and the heel’s screw holes.{hd.on ? '' : ' With the headstock off, the neck ends square at the nut.'}</p>
+                    {(() => {
+                      const tr = { ...TRUSS_START, ...(nk.truss || {}) }, built = g.truss;
+                      const setTruss = (patch) => change((d) => ({ ...d, neck: { ...d.neck, truss: { ...TRUSS_START, ...(d.neck.truss || {}), ...patch } } }));
+                      const own = (text) => <Basis kind="assumed" text={`Nothing is built in: 0 means not entered. ${text}`} />;
+                      const box = (id, label, key, max, text) => <Row label={label} htmlFor={id} basis={own(text)}><Len id={id} units={u} value={tr[key]} min={0} max={max} onChange={(v) => setTruss({ [key]: v })} /></Row>;
+                      return (
+                        <>
+                          <h4 className="sub">Truss rod channel</h4>
+                          <Row label=""><Check checked={!!tr.on} onChange={(v) => setTruss({ on: v })}>Truss rod channel</Check></Row>
+                          {tr.on && <Row label="The rod adjusts at the"><Seg value={tr.adjust === 'heel' ? 'heel' : 'head'} onChange={(v) => setTruss({ adjust: v })} options={[{ value: 'head', label: 'Headstock end' }, { value: 'heel', label: 'Heel end' }]} /></Row>}
+                          {tr.on && box('tr-width', 'Channel width', 'width', 20, 'Measure your rod across, and add what its maker says for a sliding fit.')}
+                          {tr.on && box('tr-depth', 'Channel depth', 'depth', 30, 'Measured down from the face the fretboard is glued to. Your rod’s maker gives it.')}
+                          {tr.on && box('tr-length', 'Channel length', 'length', 700, 'Your rod’s length, with what its maker says to add.')}
+                          {tr.on && box('tr-from', 'From the nut to the channel', 'fromNut', 300, 'How far from the nut line the channel starts. 0 starts it at the nut line.')}
+                          {tr.on && <h4 className="sub">Pocket for the adjuster</h4>}
+                          {tr.on && box('tr-aw', 'Pocket width', 'accessWidth', 30, 'A wider pocket for the adjusting nut, if your rod needs one. Leave all three at 0 for none.')}
+                          {tr.on && box('tr-al', 'Pocket length', 'accessLength', 120, tr.adjust === 'heel' ? 'It carries on from the channel toward the end of the heel.' : 'It carries on from the channel past the nut, over the headstock.')}
+                          {tr.on && box('tr-ad', 'Pocket depth', 'accessDepth', 30, 'Measured down from the face the fretboard is glued to.')}
+                          {tr.on && built && !built.ready && <p className="note">Enter the channel’s {built.missing.join(', ')} to draw it. No size is built in, because rods differ by maker: measure your rod.</p>}
+                          {tr.on && built && built.ready && <p className="note">A straight channel with a flat bottom for a two-way rod, on the centerline, from <b className="mono">{fmtWithUnit(built.fromNut, u)}</b> to <b className="mono">{fmtWithUnit(built.fromNut + built.length, u)}</b> from the nut. {built.under ? <>At its thinnest, <b className="mono">{fmtWithUnit(built.under.t, u)}</b> of wood is left under it, <b className="mono">{fmtWithUnit(built.under.fromNut, u)}</b> from the nut. </> : null}It is drawn with square ends: a round bit leaves round ends. It is on the drawing and in the neck’s own vector file (Save files for CNC). It is not in the 3D picture or the 3D model.</p>}
+                          {tr.on && tr.adjust === 'head' && built && built.ready && built.access && <p className="note">The adjuster’s pocket is drawn in the plane of the neck’s top face. On an angled headstock its depth is measured from that plane, not from the headstock’s face, and the wood left under it there is not checked.</p>}
+                        </>
+                      );
+                    })()}
+                    <p className="note"><b>Not built yet:</b> dragging tuner holes on the drawing, string paths to the tuners, a truss rod channel with a curved bottom for a one-way rod, the nut slot, and the heel’s screw holes.{hd.on ? '' : ' With the headstock off, the neck ends square at the nut.'}</p>
                   </>
                 );
               })()}

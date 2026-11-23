@@ -699,7 +699,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const b3 = (await state()).neck.back;
   assert(Math.abs(b3.t1 - 20.32) < 1e-9 && b3.profile === 'standardThin', `a box left without typing changes nothing (1st fret ${b3.t1})`);
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: dragging tuner holes on the drawing, string paths to the tuners, the nut slot, the truss rod channel, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: dragging tuner holes on the drawing, string paths to the tuners, a truss rod channel with a curved bottom for a one-way rod, the nut slot, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
   // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
   const h0 = (await state()).neck.head;
   assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
@@ -847,6 +847,45 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   await setField('#hs-angle', '14'); await setField('#hs-vh', '4 mm'); await setField('#hs-tr', '45 mm'); await setField('#hs-va', '25 mm');
   await page.locator('section[data-sec="neck"] button:has-text("Smooth")').click();
   return `neck STEP ${(fs.statSync(files.neck).size / 1024).toFixed(0)} KB`;
+});
+
+await step('a truss rod channel: nothing until its sizes are typed, then on the drawing, in the build checks and in a vector file of the neck\u2019s own', async () => {
+  await tab('Design'); await openSec('neck');
+  const sec = page.locator('section[data-sec="neck"]');
+  const t0 = (await state()).neck.truss;
+  assert(t0 && t0.on === false && t0.width === 0 && t0.depth === 0 && t0.length === 0, 'starts off, with no size filled in');
+  await sec.locator('label:has-text("Truss rod channel") input[type=checkbox]').check(); await settle(1800);
+  assert(await page.locator('.stage [data-k="truss"]').count() === 0, 'nothing is drawn before the sizes are in');
+  assert(/Enter the channel’s width, depth, length to draw it/.test(await sec.innerText()), 'the panel asks for the sizes');
+  assert(/The truss rod channel needs its width, depth and length/.test(await page.locator('aside.rail').innerText()), 'so do the build checks');
+  // made-up sizes for the test, in millimeters
+  await setField('#tr-width', '6 mm'); await setField('#tr-depth', '9 mm'); await setField('#tr-length', '400 mm'); await setField('#tr-from', '12 mm');
+  await settle(1800);
+  assert(await page.locator('.stage [data-k="truss"]').count() === 1, 'the channel is on the drawing');
+  const rail = await page.locator('aside.rail').innerText();
+  assert(/of wood is left under the truss rod channel at its thinnest/.test(rail), 'the build checks give the wood left under it');
+  assert(/It is not in the 3D picture or the 3D model/.test(await sec.innerText()), 'the panel says where the channel is and is not');
+  await setField('#tr-aw', '10 mm'); await setField('#tr-al', '30 mm'); await setField('#tr-ad', '11 mm'); await settle(900);
+  assert(await page.locator('.stage [data-k="truss"]').count() === 2, 'the adjuster\u2019s pocket is drawn too');
+  await setField('#tr-depth', '30 mm'); await settle(1800);
+  assert(/cuts through the back of the neck/.test(await page.locator('aside.rail').innerText()), 'a channel deeper than the neck is an error');
+  await setField('#tr-depth', '9 mm'); await settle(900);
+  const t1 = (await state()).neck.truss;
+  assert(t1.on && t1.adjust === 'head' && Math.abs(t1.width - 6) < 1e-6 && Math.abs(t1.depth - 9) < 1e-6 && Math.abs(t1.length - 400) < 1e-6 && Math.abs(t1.fromNut - 12) < 1e-6 && Math.abs(t1.accessLength - 30) < 1e-6, 'the sizes are stored as typed');
+  fs.writeFileSync(path.join(dl, 'truss-design.json'), JSON.stringify(await state()));
+  await tab('3D'); await settle(1200);
+  await page.click('.viewopts button:has-text("Save files for CNC")');
+  const dlg = page.locator('.dialog[aria-label="Save files for CNC"]');
+  await dlg.locator('.seg[aria-label="Units in the files"] button:has-text("Millimeters")').click();
+  assert(/A file for the neck holds the truss rod channel and the pocket for its adjuster/.test(await dlg.innerText()), 'the dialog says the neck has its own file');
+  await dlg.locator('button:has-text("Save CNC vectors (.zip)")').scrollIntoViewIfNeeded();
+  const pack = await saveDownload(() => dlg.locator('button:has-text("Save CNC vectors (.zip)")').click());
+  fs.renameSync(pack, path.join(dl, 'truss-cnc-pack.zip'));
+  await page.keyboard.press('Escape');
+  await tab('Design'); await openSec('neck');
+  await sec.locator('label:has-text("Truss rod channel") input[type=checkbox]').uncheck(); await settle(900);
+  assert(await page.locator('.stage [data-k="truss"]').count() === 0, 'switched off, it leaves the drawing');
+  return `6 x 9 x 400 mm channel, 12 mm from the nut, with a 10 x 30 x 11 mm pocket; pack ${Math.round(fs.statSync(path.join(dl, 'truss-cnc-pack.zip')).size / 1024)} KB`;
 });
 
 await step('the template preview zooms with the wheel, pans with a drag and refits on double-click', async () => {
