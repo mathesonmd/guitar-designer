@@ -8,7 +8,7 @@ import { BRIDGES, holeDepthGroup } from '../data/bridges.js';
 import { bindingChannel, purflingChannel } from './design.js';
 import { buildEdgeBevel } from './edgebevel.js';
 import { buildNeck } from './neck.js';
-import { buildTruss } from './truss.js';
+import { buildTruss, buildNut } from './truss.js';
 import { PICKUPS } from '../data/pickups.js';
 import { CONTROL_KINDS } from '../data/parts.js';
 
@@ -151,6 +151,7 @@ export function derive(design, { tol = 0.02 } = {}) {
   };
   out.neck = buildNeck(design, out);
   out.truss = buildTruss(design, out);
+  out.nut = buildNut(design, out);
   return out;
 }
 

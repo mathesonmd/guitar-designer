@@ -71,3 +71,36 @@ export function buildTruss(design, g) {
     accessShort: access && t.adjust === 'heel' ? access.y0 - g.heelY : 0, // > 0: the pocket stops short of the end of the heel
   };
 }
+
+// The nut, as the owner's Fretboard Designer makes it: cut in the fretboard, its front face on the nut
+// line (or `gap` behind a zero fret), `thickness` measured along the neck toward the headstock. `boardPast`
+// is how far the fretboard itself runs past the nut line: to the back of the nut ('flush'), or further
+// ('shelf'). Nothing is built in: the numbers come only from a Fretboard Designer build file, and until one
+// is loaded (thickness 0) no nut is drawn.
+export const NUT_START = { thickness: 0, gap: 0, boardPast: 0, mount: 'flush', zeroFret: false };
+export function cleanNut(raw) {
+  const r = raw && typeof raw === 'object' ? raw : {};
+  const thickness = num(r.thickness), gap = num(r.gap);
+  return { thickness, gap, boardPast: Math.max(num(r.boardPast), thickness > 0 ? gap + thickness : 0), mount: r.mount === 'shelf' ? 'shelf' : 'flush', zeroFret: !!r.zeroFret };
+}
+// What a Fretboard Designer build file says about the nut, in millimeters (k = millimeters per file unit).
+export function nutFromFretboardFile(params, k) {
+  const p = params || {}, thickness = num(p.nutThickness) * k;
+  if (!(thickness > 0)) return { ...NUT_START };
+  const zeroFret = !!p.zeroFret, gap = zeroFret ? num(p.nutZeroGap) * k : 0, shelf = p.nutMount === 'shelf';
+  return cleanNut({ thickness, gap, zeroFret, mount: shelf ? 'shelf' : 'flush', boardPast: shelf ? num(p.spaceBeforeNut) * k : gap + thickness });
+}
+// The nut on the drawing: null until a file has been loaded. The nut and the end of the fretboard follow the
+// fretboard's edges carried on past the nut line, as the Fretboard Designer draws them.
+export function buildNut(design, g) {
+  const n = cleanNut(design.neck.nut);
+  if (!(n.thickness > 0)) return null;
+  const front = g.nutY + n.gap, back = front + n.thickness, end = g.nutY + n.boardPast;
+  const at = (y) => g.neckHalf(y);
+  return {
+    ...n, front, back, boardEnd: end,
+    poly: [{ x: -at(front), y: front }, { x: at(front), y: front }, { x: at(back), y: back }, { x: -at(back), y: back }],
+    // the fretboard past the nut line, to its end
+    board: [{ x: -at(g.nutY), y: g.nutY }, { x: at(g.nutY), y: g.nutY }, { x: at(end), y: end }, { x: -at(end), y: end }],
+  };
+}

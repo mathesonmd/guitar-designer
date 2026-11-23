@@ -699,7 +699,7 @@ await step('the neck: a back from a thickness profile, a headstock redrawn on th
   const b3 = (await state()).neck.back;
   assert(Math.abs(b3.t1 - 20.32) < 1e-9 && b3.profile === 'standardThin', `a box left without typing changes nothing (1st fret ${b3.t1})`);
   const note = await page.locator('section[data-sec="neck"]').innerText();
-  assert(/Not built yet: dragging tuner holes on the drawing, string paths to the tuners, a truss rod channel with a curved bottom for a one-way rod, the nut slot, and the heel’s screw holes/.test(note), 'the panel says what the neck does not have yet');
+  assert(/Not built yet: dragging tuner holes on the drawing, string paths to the tuners, a truss rod channel with a curved bottom for a one-way rod, and the heel’s screw holes\. The nut’s slot is cut in the fretboard/.test(note), 'the panel says what the neck does not have yet');
   // the headstock: its outline is on the drawing above the nut, and its points drag like the body outline's
   const h0 = (await state()).neck.head;
   assert(h0.on && h0.angle === 14 && h0.outline.nodes.length === 9, 'starts with an angled headstock and its starting outline');
@@ -948,8 +948,25 @@ await step('a Fretboard Designer build file sets scale, frets, nut and compensat
   near(d.compensation.treble, 0.04 * 25.4, 1e-6, 'treble comp'); near(d.compensation.bass, 0.1 * 25.4, 1e-6, 'bass comp');
   near(d.neck.scale - d.neck.nutToHeel, before.neck.scale - before.neck.nutToHeel, 1e-6, 'heel stays the same distance from the bridge');
   assert(d.neck.preset === 'custom', 'neck marked custom');
+  assert(d.neck.nut.thickness === 0 && await page.locator('.stage [data-k="nut"]').count() === 0, 'a file with no nut thickness draws no nut');
   await page.click('button[aria-label="Undo"]');
   assert(JSON.stringify((await state()).neck) === JSON.stringify(before.neck), 'undo restores the neck');
+  // the nut, in the Fretboard Designer's own field names: flush end first, then a zero fret with a shelf
+  const load = async (extra) => { await page.setInputFiles('section[data-sec="neck"] input[type=file]', { name: 'board.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify({ ...fb, params: { ...fb.params, ...extra } })) }); await waitToast(/the nut is drawn at its thickness/); return state(); };
+  const flush = await load({ nutThickness: 0.125, nutMount: 'flush', zeroFret: false, nutZeroGap: 0.0625, spaceBeforeNut: 0.3 });
+  near(flush.neck.nut.thickness, 3.175, 1e-6, 'nut thickness'); near(flush.neck.nut.gap, 0, 1e-9, 'no zero fret, no gap'); near(flush.neck.nut.boardPast, 3.175, 1e-6, 'the board ends at the back of the nut');
+  assert(await page.locator('.stage [data-k="nut"]').count() === 1 && await page.locator('.stage [data-k="board-past-nut"]').count() === 1, 'the nut and the end of the fretboard are on the drawing');
+  const box = await page.locator('.stage [data-k="nut"]').boundingBox(), sc = (await view()).s;
+  // (the box on screen includes the 1 px line around the nut)
+  near((box.height - 1) / sc, 3.175, 0.4, 'the nut is drawn at its thickness'); near((box.width - 1) / sc, 1.68 * 25.4, 0.6, 'and as wide as the neck at the nut');
+  assert(/Nut, from your Fretboard Designer file: 0\.125 in thick, its front face on the nut line/.test(await page.locator('[data-k="nut-note"]').innerText()), 'the panel says what was loaded');
+  const shelf = await load({ nutThickness: 0.125, nutMount: 'shelf', zeroFret: true, nutZeroGap: 0.0625, spaceBeforeNut: 0.3 });
+  near(shelf.neck.nut.gap, 0.0625 * 25.4, 1e-6, 'behind the zero fret'); near(shelf.neck.nut.boardPast, 0.3 * 25.4, 1e-6, 'the board runs on to its shelf'); assert(shelf.neck.nut.mount === 'shelf' && shelf.neck.nut.zeroFret, 'shelf, zero fret');
+  assert(/behind the zero fret/.test(await page.locator('[data-k="nut-note"]').innerText()) && /leaving a shelf behind the nut/.test(await page.locator('[data-k="nut-note"]').innerText()), 'the panel describes the zero fret and the shelf');
+  await page.locator('[data-k="nut-note"] button:has-text("Remove the nut")').click(); await settle(600);
+  assert(await page.locator('.stage [data-k="nut"]').count() === 0 && (await state()).neck.nut.thickness === 0, 'the nut can be removed');
+  for (let i = 0; i < 3; i++) await page.click('button[aria-label="Undo"]');
+  assert(JSON.stringify((await state()).neck) === JSON.stringify(before.neck), 'undo restores the neck again');
 });
 
 await step('the sources dialog lists every built-in number with its basis', async () => {

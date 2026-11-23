@@ -5,7 +5,7 @@ import { BRIDGES, HOLE_DEPTH_GROUPS } from '../data/bridges.js';
 import { PICKUPS } from '../data/pickups.js';
 import { WOODS, BITS, BUSHINGS, BUSHING_LABELS, CONTROL_KINDS, CONTROL_NOTE } from '../data/parts.js';
 import { TUNER_START, TUNER_LAYOUTS } from '../data/neckprofiles.js';
-import { TRUSS_START } from '../model/truss.js';
+import { TRUSS_START, NUT_START } from '../model/truss.js';
 import { applyNeckPreset, makeBridge, makePickup, makeControl, makeCavity, neckBasis, makeNeckBack, makeHeadstock, makeSideLine, makeTongueLine, seatOnPocket } from '../model/design.js';
 import { NECK_PROFILES, NECK_PROFILE_BASIS } from '../data/neckprofiles.js';
 import { setSymmetric, storedIndex } from '../core/path.js';
@@ -213,7 +213,7 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
                         </>
                       );
                     })()}
-                    <p className="note"><b>Not built yet:</b> dragging tuner holes on the drawing, string paths to the tuners, a truss rod channel with a curved bottom for a one-way rod, the nut slot, and the heel’s screw holes.{hd.on ? '' : ' With the headstock off, the neck ends square at the nut.'}</p>
+                    <p className="note"><b>Not built yet:</b> dragging tuner holes on the drawing, string paths to the tuners, a truss rod channel with a curved bottom for a one-way rod, and the heel’s screw holes. The nut’s slot is cut in the fretboard, by the Fretboard Designer.{hd.on ? '' : ' With the headstock off, the neck ends square at the nut.'}</p>
                   </>
                 );
               })()}
@@ -224,6 +224,9 @@ export default function Panels({ design, g, sel, setSel, change, onStarter, onAd
           <button className="btn small" onClick={() => fbRef.current.click()}>Load a Fretboard Designer file…</button>
           <input ref={fbRef} type="file" accept=".json,application/json" hidden onChange={(e) => { if (e.target.files[0]) onImportFretboard(e.target.files[0]); e.target.value = ''; }} />
         </div>
+        {g.nut
+          ? <p className="note" data-k="nut-note">Nut, from your Fretboard Designer file: <b className="mono">{fmtWithUnit(g.nut.thickness, u)}</b> thick, its front face {g.nut.zeroFret ? <><b className="mono">{fmtWithUnit(g.nut.gap, u)}</b> behind the zero fret</> : 'on the nut line'}. The fretboard runs <b className="mono">{fmtWithUnit(g.nut.boardPast, u)}</b> past the nut line{g.nut.mount === 'shelf' ? ', leaving a shelf behind the nut' : ', ending at the back of the nut'}. Both are on the drawing. The nut’s slot is cut in the fretboard, by the Fretboard Designer: nothing is cut for it in the neck, and it is not in the 3D picture or any file here. <button className="btn small" onClick={() => change((d) => ({ ...d, neck: { ...d.neck, nut: { ...NUT_START } } }))}>Remove the nut</button></p>
+          : <p className="note" data-k="nut-note">A Fretboard Designer file also brings its nut: its thickness and where the fretboard ends are then drawn here. No nut size is built in, so none is drawn until a file is loaded.</p>}
       </Acc>
 
       <Acc id="bridge" title="Bridge and strings" hint={bdef.label.split(',')[0].split('(')[0].trim()}>

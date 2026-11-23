@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 98 geometry and export tests (Node, no browser)
+    npm test               # 99 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -308,6 +308,20 @@ headstock end or the heel end.
 - Stated on screen: the ends are drawn square (a round bit leaves round ends); the channel is not in the
   3D picture or the 3D model; a headstock-end pocket is drawn in the plane of the neck's top face, so on
   an angled headstock its depth is measured from that plane and the wood under it there is not checked.
+
+## The nut
+
+The nut's slot is cut in the fretboard, by the Fretboard Designer. This app only reads the nut from a
+Fretboard Designer build file and draws it (`nutFromFretboardFile`, `buildNut` in `src/model/truss.js`;
+stored as `design.neck.nut`). No nut size is built in: until a file is loaded nothing is drawn.
+
+- Read from the file: `nutThickness`; `zeroFret` and `nutZeroGap` (the nut sits that far behind a zero
+  fret); `nutMount` and `spaceBeforeNut` (a 'flush' board ends at the back of the nut, a 'shelf' board
+  runs `spaceBeforeNut` past the nut line).
+- Drawn: the nut as a solid bar with its front face on the nut line (or behind the zero fret), and the
+  fretboard carried on past the nut line to its end, both following the fretboard's edges.
+- Nothing is cut for the nut in the neck, and it is not in the 3D picture or any file; the panel says so.
+  "Remove the nut" under Neck clears it.
 
 ## Not built yet
 

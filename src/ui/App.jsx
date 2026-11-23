@@ -1,3 +1,4 @@
+import { nutFromFretboardFile } from '../model/truss.js';
 import React, { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { LOGO } from '../assets/logo.js';
 import { defaultDesign, normalizeDesign, STARTERS, newId, SCHEMA, seatOnPocket } from '../model/design.js';
@@ -148,11 +149,11 @@ export default function App() {
       const multi = p.scaleMode !== 'single' && Math.abs(p.scaleBass - p.scaleTreble) > 1e-6;
       change((d) => ({
         ...d,
-        neck: { ...d.neck, preset: 'custom', scale: p.scaleTreble * k, frets: Math.round(p.numFrets), nutWidth: (p.nutSpread + p.overhangBass + p.overhangTreble) * k, nutToHeel: d.neck.nutToHeel + (p.scaleTreble * k - d.neck.scale) },
+        neck: { ...d.neck, nut: nutFromFretboardFile(p, k), preset: 'custom', scale: p.scaleTreble * k, frets: Math.round(p.numFrets), nutWidth: (p.nutSpread + p.overhangBass + p.overhangTreble) * k, nutToHeel: d.neck.nutToHeel + (p.scaleTreble * k - d.neck.scale) },
         strings: { ...d.strings, nutSpread: p.nutSpread * k },
         compensation: { treble: p.compTreble * k, bass: p.compBass * k },
       }));
-      toast(multi ? 'Loaded the treble-side scale. Fanned-fret necks are not supported here yet.' : 'Scale, frets, nut and compensation loaded. The heel was kept the same distance from the bridge: check “Nut to end of heel” against your neck.');
+      toast(multi ? 'Loaded the treble-side scale. Fanned-fret necks are not supported here yet.' : `Scale, frets, nut and compensation loaded${nutFromFretboardFile(p, k).thickness > 0 ? ', and the nut is drawn at its thickness' : ''}. The heel was kept the same distance from the bridge: check “Nut to end of heel” against your neck.`);
     } catch (e) { toast('That file could not be read.'); }
   };
 

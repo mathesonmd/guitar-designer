@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 98 geometry and export tests (47 of them build the CAD solid)
+    npm test                  # 99 geometry and export tests (47 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 36 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -157,9 +157,11 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   `TOP_TRUSS_ROD_ADJUSTER_POCKET_<w>_WIDE_<d>_DEEP`), not in the 3D model. He has not seen that file or
   its layer names: ask before changing them. If he gives the sizes of the rod he uses, they go in as
   `shop` numbers with a source.
-- The nut slot is not built here. He pointed out that "the fretboard designer already has a function to
-  cut a nut slot": there the nut sits in the fretboard (`nutMount` 'flush' or 'shelf', `nutThickness`
-  0.125 in, `nutZeroGap` behind a zero fret). What this app should do with the nut is still his to say.
+- The nut: he pointed out that "the fretboard designer already has a function to cut a nut slot", then
+  asked (23 November 2026) to "read the nut from the Fretboard Designer file and draw it". Built: loading
+  a Fretboard Designer build file stores `design.neck.nut` (thickness, a zero fret's gap, where the
+  fretboard ends: `nutMount` 'flush' or 'shelf'), and the nut and the board's end are drawn. No nut size
+  is built in, nothing is cut for it in the neck, and it is in no file and not in the 3D picture.
 - Number boxes (`Len`, `Num` in `widgets.jsx`) write nothing unless typed in. Before that, a box that
   still held focus could re-apply its old text after another control changed its value (a thickness
   typed, then a profile picked): it showed up as a click-through step failing one run in three.
@@ -203,12 +205,13 @@ and a headstock, its outline drawn in the app, its back one surface with the nec
 peaked volute on the crown of the back, or a tongue (a flat with a crisp edge and a cove); the side view of the back and the tongue's
 outline can each be drawn in place of the numbers; the headstock can be angled back or flat (level with
 the neck, its face stepped down, with a scoop from the nut); both drawn lines have Bezier handles; tuner
-holes (three a side or six in a line) on the drawing and in the headstock's own vector file; a truss rod
+holes (three a side or six in a line) on the drawing and in the headstock's own vector file; the nut read
+from a Fretboard Designer file and drawn; a truss rod
 channel for a two-way rod with a pocket for its adjuster at either end, from sizes the builder types in,
 on the drawing and in the neck's own vector file.
 
 **Not built:** tremolos, basses, set necks and angled pockets, fanned frets, left-handed bodies,
-carved tops, dragging tuner holes on the drawing, string paths to the tuners, the nut slot, a truss rod channel with a curved
+carved tops, dragging tuner holes on the drawing, string paths to the tuners, the nut in the 3D picture, a truss rod channel with a curved
 bottom for a one-way rod, the truss rod channel in the 3D picture and the neck's 3D model, the neck's
 heel screw holes, a sculpted
 heel on the body, a roundover in the STEP and STL along a straight edge between two sharp corners (the
@@ -238,8 +241,8 @@ touch gestures, Safari and Firefox are untried.
   tongue, and the flat headstock's step and scoop; whether the headstock vector file and its layer names
   suit him, and his tuner hole size and spacing.
 - The truss rod: the sizes of the rod he uses (to become the starting numbers), whether the neck's
-  vector file and its layer names suit him, and what he wants done about the nut here, given that the
-  Fretboard Designer already puts the nut slot in the fretboard.
+  vector file and its layer names suit him, and whether the drawn nut should also move anything
+  (where the headstock's scoop or the truss rod's pocket starts).
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.

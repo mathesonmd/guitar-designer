@@ -5,7 +5,7 @@ import { NECK_PRESETS } from '../data/necks.js';
 import { BINDING_START, BELLY_BLEND_START, EDGE_BEVEL_START, PURFLING_START } from '../data/parts.js';
 import { NECK_PROFILES, NECK_SHAPE_START, HEADSTOCK_START, HEADSTOCK_OUTLINE_START } from '../data/neckprofiles.js';
 import { bellyParams } from './solid.js';
-import { TRUSS_START, cleanTruss } from './truss.js';
+import { TRUSS_START, cleanTruss, NUT_START, cleanNut } from './truss.js';
 import { BRIDGES } from '../data/bridges.js';
 import { PICKUPS, PICKUP_HOME } from '../data/pickups.js';
 import { SHOP } from '../data/shop.js';
@@ -234,7 +234,7 @@ export function defaultDesign() {
     units: 'in',
     outline: seatOnPocket(JSON.parse(JSON.stringify(STARTERS.doublecut.outline)), applyNeckPreset({}, 'fender22')),
     body: { thickness, roundTop: IN / 8, roundTopOn: true, roundBack: IN / 8, roundBackOn: true, binding: { on: false, ...BINDING_START }, edgeBevel: { on: false, ...EDGE_BEVEL_START, roll: 0, purfling: false, purflingWidth: PURFLING_START.width, purflingDepth: PURFLING_START.depth }, wood: 'alder', customDensity: 500 },
-    neck: { ...applyNeckPreset({}, 'fender22'), back: makeNeckBack('standardThin'), head: makeHeadstock(), truss: { ...TRUSS_START } },
+    neck: { ...applyNeckPreset({}, 'fender22'), back: makeNeckBack('standardThin'), head: makeHeadstock(), truss: { ...TRUSS_START }, nut: { ...NUT_START } },
     strings: { count: 6, nutSpread: 1.375 * IN },
     compensation: { treble: 0.03 * IN, bass: 0.09 * IN },
     bridge: makeBridge('hipshot'),
@@ -276,6 +276,7 @@ export function normalizeDesign(raw) {
   if (!rawHead || !rawHead.outline || !Array.isArray(rawHead.outline.nodes) || rawHead.outline.nodes.length < 3) out.neck.head.outline = d.neck.head.outline;
   else out.neck.head.outline = { open: true, nodes: rawHead.outline.nodes };
   out.neck.truss = cleanTruss((raw.neck || {}).truss);
+  out.neck.nut = cleanNut((raw.neck || {}).nut);
   out.strings = { ...d.strings, ...(raw.strings || {}) };
   out.compensation = { ...d.compensation, ...(raw.compensation || {}) };
   out.bridge = raw.bridge && BRIDGES[raw.bridge.type]

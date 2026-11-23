@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { defaultDesign, normalizeDesign } from '../src/model/design.js';
 import { derive } from '../src/model/derive.js';
 import { runChecks } from '../src/model/checks.js';
-import { TRUSS_START, cleanTruss } from '../src/model/truss.js';
+import { TRUSS_START, cleanTruss, NUT_START, cleanNut, nutFromFretboardFile } from '../src/model/truss.js';
 import { buildCncVectors, cncDXF, cncReadme } from '../src/export/cnc.js';
 import { expandArcs } from '../src/core/arcfit.js';
 import { bbox } from '../src/core/poly.js';
@@ -109,4 +109,38 @@ test('the neck gets its own vector file: outline, nut line, and the channel on a
   assert.match(cncDXF(f), /TOP_TRUSS_ROD_CHANNEL_6\.00MM_WIDE_9\.00MM_DEEP/);
   const text = cncReadme(d, v, ['a-cnc-top.dxf', 'a-cnc-back.dxf', 'a-cnc-headstock.dxf', 'a-cnc-neck.dxf']);
   assert.match(text, /The neck file is a separate part/); assert.match(text, /a-cnc-neck\.dxf/);
+});
+
+test('the nut comes only from a Fretboard Designer file: its thickness, a zero fret\u2019s gap, and where the fretboard ends', () => {
+  const d = defaultDesign();
+  assert.deepEqual(d.neck.nut, { thickness: 0, gap: 0, boardPast: 0, mount: 'flush', zeroFret: false });
+  assert.equal(derive(d).nut, null, 'no nut is drawn until a file is loaded');
+  const old = JSON.parse(JSON.stringify(d)); delete old.neck.nut;
+  assert.deepEqual(normalizeDesign(old).neck.nut, NUT_START);
+  // the Fretboard Designer's own field names and starting values (inches): flush end
+  const fd = { nutThickness: 0.125, nutZeroGap: 0.0625, nutMount: 'flush', zeroFret: false, spaceBeforeNut: 0.3 };
+  const flush = nutFromFretboardFile(fd, 25.4);
+  assert.deepEqual(flush, { thickness: 3.175, gap: 0, boardPast: 3.175, mount: 'flush', zeroFret: false });
+  // a zero fret puts the nut behind it; a shelf carries the board past the nut
+  const zero = nutFromFretboardFile({ ...fd, zeroFret: true }, 25.4);
+  near(zero.gap, 1.5875, 1e-9); near(zero.boardPast, 1.5875 + 3.175, 1e-9, 'flush: the board ends at the back of the nut');
+  const shelf = nutFromFretboardFile({ ...fd, nutMount: 'shelf' }, 25.4);
+  near(shelf.boardPast, 7.62, 1e-9); assert.equal(shelf.mount, 'shelf');
+  // a file in millimeters is taken as it is; a file with no nut gives none; a shelf shorter than the nut cannot be
+  near(nutFromFretboardFile({ nutThickness: 4 }, 1).thickness, 4, 1e-12);
+  assert.deepEqual(nutFromFretboardFile({}, 25.4), NUT_START);
+  near(cleanNut({ thickness: 3, gap: 1, boardPast: 2 }).boardPast, 4, 1e-12);
+  // on the drawing: front face on the nut line, as wide as the fretboard's edges carried on past it
+  d.neck.nut = shelf;
+  const g = derive(d), n = g.nut, b = bbox(n.poly);
+  near(b.y0, g.nutY, 1e-9); near(b.y1, g.nutY + 3.175, 1e-9); near(b.w, d.neck.nutWidth, 1e-9, 'nut width at its front face');
+  for (const q of n.poly) near(Math.abs(q.x), g.neckHalf(q.y), 1e-9);
+  assert.ok(Math.abs(n.poly[2].x) < Math.abs(n.poly[1].x), 'a hair narrower at its back, as the neck tapers');
+  const bb = bbox(n.board); near(bb.y0, g.nutY, 1e-9); near(bb.y1, g.nutY + 7.62, 1e-9, 'the fretboard\u2019s end');
+  d.neck.nut = zero;
+  near(bbox(derive(d).nut.poly).y0, derive(d).nutY + 1.5875, 1e-9, 'behind the zero fret');
+  // nothing else moves: the pocket, the frets and the files are the same with a nut as without
+  const plain = derive(defaultDesign());
+  assert.deepEqual(g.pocket, plain.pocket); assert.deepEqual(g.frets, plain.frets);
+  assert.deepEqual(buildCncVectors(d, derive(d, { tol: 0.005 })).files.map((f) => f.layers.map((L) => L.name)), buildCncVectors(defaultDesign(), derive(defaultDesign(), { tol: 0.005 })).files.map((f) => f.layers.map((L) => L.name)));
 });
