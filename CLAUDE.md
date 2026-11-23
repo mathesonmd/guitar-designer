@@ -25,7 +25,7 @@ from what this app produces, so these rules carry more weight than speed.
 
 ## Before saying a change is done
 
-    npm test                  # 99 geometry and export tests (47 of them build the CAD solid)
+    npm test                  # 100 geometry and export tests (47 of them build the CAD solid)
     npm run build
     node test/interact.mjs    # 36 click-through steps in headless Chromium
     node test/viewer.mjs      # 22 checks of the claude.ai artifact build
@@ -162,6 +162,10 @@ confirmed. If the `gmsh` Python package is installed it also opens the STEP file
   a Fretboard Designer build file stores `design.neck.nut` (thickness, a zero fret's gap, where the
   fretboard ends: `nutMount` 'flush' or 'shelf'), and the nut and the board's end are drawn. No nut size
   is built in, nothing is cut for it in the neck, and it is in no file and not in the 3D picture.
+  Then "make the scoop and truss rod pocket follow the nut" (same day): with a nut loaded, the flat
+  headstock's scoop and the truss rod's headstock-end pocket start at the end of the fretboard
+  (`boardPast` beyond the nut line), not at the nut line. The pocket's length is now what is left open
+  past the fretboard. An angled headstock still tilts from the nut line: he has not asked for that.
 - Number boxes (`Len`, `Num` in `widgets.jsx`) write nothing unless typed in. Before that, a box that
   still held focus could re-apply its old text after another control changed its value (a thickness
   typed, then a profile picked): it showed up as a click-through step failing one run in three.
@@ -241,8 +245,8 @@ touch gestures, Safari and Firefox are untried.
   tongue, and the flat headstock's step and scoop; whether the headstock vector file and its layer names
   suit him, and his tuner hole size and spacing.
 - The truss rod: the sizes of the rod he uses (to become the starting numbers), whether the neck's
-  vector file and its layer names suit him, and whether the drawn nut should also move anything
-  (where the headstock's scoop or the truss rod's pocket starts).
+  vector file and its layer names suit him, and whether an angled headstock should also start its
+  tilt at the end of the fretboard, not at the nut line, once a nut is loaded.
 - Electric Herald (electricherald.com): whether to ask its owner about linking to or working with the
   collection, and whether importing a PDF drawing as a reference is worth building.
 - He would adjust the arm bevel and belly cut further but says they will work.

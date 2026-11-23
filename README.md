@@ -8,7 +8,7 @@ for cutting pockets and holes on a CNC router, and a 3D model of the body (STEP 
 
     npm install
     npm run build          # writes dist/index.html and dist/artifact.html
-    npm test               # 99 geometry and export tests (Node, no browser)
+    npm test               # 100 geometry and export tests (Node, no browser)
     npm run test:browser   # builds, then clicks through the page in headless Chromium
     python3 tools/check_exports.py   # re-reads the files the click-through saved, with its own parsers
 
@@ -322,6 +322,12 @@ stored as `design.neck.nut`). No nut size is built in: until a file is loaded no
   fretboard carried on past the nut line to its end, both following the fretboard's edges.
 - Nothing is cut for the nut in the neck, and it is not in the 3D picture or any file; the panel says so.
   "Remove the nut" under Neck clears it.
+- Two things follow the nut (the owner's ask, 23 November 2026). Both start at the end of the fretboard,
+  which is the nut line until a nut is loaded and `boardPast` beyond it afterwards:
+  the flat headstock's scoop (`head.scoopFrom` in `neck.js`: the face stays level under the nut and the
+  board, then the same arc), and the truss rod's headstock-end pocket, which runs from the channel's end
+  to its length past the end of the fretboard (so that length is what is left open on the headstock).
+  An angled headstock still tilts from the nut line.
 
 ## Not built yet
 

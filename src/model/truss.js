@@ -10,8 +10,12 @@
 //   width, depth  the channel, across and down from the neck's top face (the face the fretboard is glued to)
 //   length        the channel's length
 //   fromNut       from the nut line to the channel's end nearest the headstock (0 = it starts at the nut line)
-//   accessWidth, accessLength, accessDepth   the pocket for the adjuster: it carries on from the channel's
-//                 end, past the nut over the headstock, or toward the end of the heel. All 0 = no pocket.
+//   accessWidth, accessLength, accessDepth   the pocket for the adjuster. All 0 = no pocket.
+//                 At the heel it carries on `accessLength` from the channel's end toward the end of the heel.
+//                 At the headstock it runs from the channel's end to `accessLength` past the end of the
+//                 fretboard: that is the nut line until a nut has been read from a Fretboard Designer file,
+//                 and with one, the fretboard's end past the nut (the back of the nut, or the end of its
+//                 shelf). So `accessLength` is the length of pocket left open on the headstock.
 export const TRUSS_START = { on: false, adjust: 'head', width: 0, depth: 0, length: 0, fromNut: 0, accessWidth: 0, accessLength: 0, accessDepth: 0 };
 export const TRUSS_LABELS = { width: 'channel width', depth: 'channel depth', length: 'channel length' };
 
@@ -42,8 +46,9 @@ export function buildTruss(design, g) {
   const accessSizes = ['accessWidth', 'accessLength', 'accessDepth'].filter((k) => t[k] > 0);
   let access = null;
   if (accessSizes.length === 3) {
-    const a = t.adjust === 'heel' ? yHeel : yHead, b = t.adjust === 'heel' ? yHeel - t.accessLength : yHead + t.accessLength;
-    access = { poly: rect(t.accessWidth / 2, a, b), width: t.accessWidth, length: t.accessLength, depth: t.accessDepth, y0: Math.min(a, b), y1: Math.max(a, b) };
+    const nut = cleanNut(design.neck.nut), boardEnd = g.nutY + (nut.thickness > 0 ? nut.boardPast : 0);
+    const a = t.adjust === 'heel' ? yHeel : yHead, b = t.adjust === 'heel' ? yHeel - t.accessLength : boardEnd + t.accessLength;
+    access = { poly: rect(t.accessWidth / 2, a, b), width: t.accessWidth, length: t.accessLength, depth: t.accessDepth, y0: Math.min(a, b), y1: Math.max(a, b), ...(t.adjust === 'heel' ? {} : { boardEnd, pastNut: boardEnd - g.nutY, underBoard: boardEnd - yHead }) };
   }
   // wood left under the channel: the neck's depth on the centerline (the fretboard is not part of it), less
   // the channel's depth, at its thinnest place between the nut and the end of the heel
